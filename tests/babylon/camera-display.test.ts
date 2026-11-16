@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
+import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture.js";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder.js";
+// What lets a mesh make instances of itself.
+import "@babylonjs/core/Meshes/instancedMesh.js";
 import { CreatePlane } from "@babylonjs/core/Meshes/Builders/planeBuilder.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { CameraDisplay, DisplayMaterial, attachDisplay, type DisplayChangeKind } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, DisplayMaterial, TextureDisplay, attachDisplay, type DisplayChangeKind } from "@spacexr/spatial-display-babylon";
+import { Display } from "@spacexr/spatial-display-core";
 
 const makeEngine = (): NullEngine => new NullEngine({ renderWidth: 1280, renderHeight: 720, textureSize: 512, deterministicLockstep: false, lockstepMaxSteps: 1 });
 
@@ -239,5 +244,81 @@ describe("CameraDisplay", () => {
     bound.onChangedObservable.add((change) => kinds.push(change.kind));
     other.scene.dispose();
     expect(kinds).toEqual(["disposed"]);
+  });
+});
+
+describe("transparency of displays", () => {
+  it("stores the background of a camera display multiplied by its alpha, and tells when it turns see-through", () => {
+    const engine = makeEngine();
+    const world = makeScene(engine, "world");
+    const display = new CameraDisplay({ camera: world.camera, clearColor: { r: 1, g: 0.5, b: 0.2, a: 0.5 } });
+    expect(display).toBeInstanceOf(Display);
+    expect(display.premultipliedAlpha).toBe(true);
+    expect(display.texture.clearColor.asArray()).toEqual([0.5, 0.25, 0.1, 0.5]);
+    expect(display.texture.hasAlpha).toBe(true);
+
+    const changes: DisplayChangeKind[] = [];
+    display.onChangedObservable.add((change) => changes.push(change.kind));
+    display.clearColor = { r: 0, g: 0, b: 0, a: 0 };
+    expect(changes).toEqual([]);
+    // Back to the clear color of the scene, which is opaque.
+    display.clearColor = null;
+    expect(display.texture.clearColor).toBeUndefined();
+    expect(display.texture.hasAlpha).toBe(false);
+    expect(changes).toEqual(["alpha"]);
+  });
+
+  it("makes a display of a texture the application has", () => {
+    const engine = makeEngine();
+    const host = makeScene(engine, "host");
+    const picture = RawTexture.CreateRGBATexture(new Uint8Array(8 * 4 * 4), 8, 4, host.scene);
+    const display = new TextureDisplay(picture);
+    expect(display.texture).toBe(picture);
+    expect(display.resolution).toEqual({ width: 8, height: 4 });
+    // The colors of a picture are not multiplied by its alpha.
+    expect(display.premultipliedAlpha).toBe(false);
+
+    // Any kind of mesh, as a scene hands them out.
+    const wall: AbstractMesh = CreatePlane("wall", { size: 2 }, host.scene);
+    const surface = attachDisplay(wall, display);
+    expect(surface.material.premultipliedImage).toBe(false);
+    expect(surface.material.useImageAlpha).toBe(false);
+    surface.dispose();
+
+    // A picture with transparent parts says so, as for any material of Babylon.js.
+    picture.hasAlpha = true;
+    const seeThrough = attachDisplay(wall, display);
+    expect(seeThrough.material.useImageAlpha).toBe(true);
+    expect(seeThrough.material.needAlphaBlending()).toBe(true);
+
+    const kinds: DisplayChangeKind[] = [];
+    display.onChangedObservable.add((change) => kinds.push(change.kind));
+    display.dispose();
+    expect(kinds).toEqual(["disposed"]);
+    // The texture belongs to the application.
+    expect(host.scene.textures).toContain(picture);
+    expect(wall.material).toBeNull();
+  });
+
+  it("refuses to show on an instance, which has no material of its own", () => {
+    const engine = makeEngine();
+    const host = makeScene(engine, "host");
+    const display = new CameraDisplay({ camera: host.camera });
+    const wall = CreatePlane("wall", { size: 2 }, host.scene);
+    expect(() => attachDisplay(wall.createInstance("copy"), display)).toThrow(/instance/);
+  });
+
+  it("keys a color with a hue by its share in each pixel, and a gray one by distance", () => {
+    const engine = makeEngine();
+    const host = makeScene(engine, "host");
+    const display = new CameraDisplay({ camera: host.camera });
+    const wall = CreatePlane("wall", { size: 2 }, host.scene);
+    const surface = attachDisplay(wall, display, { chromaKey: { color: { r: 0, g: 1, b: 0 } } });
+    expect(surface.material.needAlphaBlending()).toBe(true);
+    expect(surface.chromaKey).toEqual({ color: { r: 0, g: 1, b: 0 } });
+    surface.chromaKey = { color: { r: 0, g: 0, b: 0 }, threshold: 0.2 };
+    expect(surface.material.chromaKey?.threshold).toBe(0.2);
+    surface.chromaKey = null;
+    expect(surface.material.needAlphaBlending()).toBe(false);
   });
 });

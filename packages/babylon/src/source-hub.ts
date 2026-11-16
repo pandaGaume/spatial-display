@@ -78,7 +78,8 @@ export class SourceHub {
     if (render) this.render();
   }
 
-  private render(): void {
+  /** Renders the scene now, off the canvas: the displays whose image is due are drawn. */
+  render(): void {
     const scene = this.scene;
     if (!this.warned && this.renderedFrame >= 0 && scene.getFrameId() !== this.renderedFrame) {
       this.warned = true;

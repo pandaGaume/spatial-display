@@ -45,6 +45,11 @@
   <body>
     <canvas id="canvas" tabindex="0"></canvas>
     <form id="controls" autocomplete="off">
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="screen">screen</option>
+        <option value="window">window</option>
+      </select>
       <label for="opacity">Opacity</label>
       <input id="opacity" type="range" min="0" max="1" step="0.01" value="0.9" />
       <label for="width">Width</label>
@@ -52,7 +57,27 @@
       <label for="height">Height</label>
       <input id="height" type="range" min="0.3" max="2" step="0.01" value="0.9" />
       <label for="section">Frame</label>
-      <input id="section" type="range" min="0.005" max="0.15" step="0.001" value="0.03" />
+      <input id="section" type="range" min="0" max="0.1" step="0.001" value="0.012" />
+      <label for="glowSize">Glow size</label>
+      <input id="glowSize" type="range" min="0" max="0.6" step="0.005" value="0.18" />
+      <label for="glowIntensity">Glow intensity</label>
+      <input id="glowIntensity" type="range" min="0" max="4" step="0.05" value="1.4" />
+      <label for="glowColor">Glow color</label>
+      <input id="glowColor" type="color" value="#1a8cff" />
+      <label for="lineColor">Line color</label>
+      <input id="lineColor" type="color" value="#ffffff" />
+      <label for="worldDepth">World glow depth</label>
+      <input id="worldDepth" type="range" min="0" max="2" step="0.01" value="0.36" />
+      <label for="worldIntensity">World glow intensity</label>
+      <input id="worldIntensity" type="range" min="0" max="3" step="0.05" value="1" />
+      <label for="source">Shows</label>
+      <select id="source">
+        <option value="world">world</option>
+        <option value="world-clear">world, see-through background</option>
+        <option value="picture">picture with alpha</option>
+        <option value="green">picture on green, keyed</option>
+        <option value="none">nothing</option>
+      </select>
       <label for="fit">Fit</label>
       <select id="fit">
         <option>stretch</option>

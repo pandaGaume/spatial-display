@@ -9,10 +9,16 @@ export interface IVec2 {
   y: number;
 }
 
-/** Something that shows an image: a render target, a video, a canvas... */
+/**
+ * Something that shows an image: a render target, a video, a canvas...
+ * Optional members are the extension points; a display that does not need
+ * them leaves them out.
+ */
 export interface IDisplay {
   /** Size of the image, in pixels. */
   readonly resolution: Readonly<ISize2>;
+  /** Changes the size of the image, in pixels. Left out by a display whose image has a size of its own, as a picture. */
+  resize?(width: number, height: number): void;
   dispose(): void;
 }
 

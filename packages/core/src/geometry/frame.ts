@@ -60,11 +60,7 @@ export function writeRectFrame(options: Readonly<IRectFrameOptions>, positions: 
   const front = -section / 2;
   const back = section / 2;
 
-  // Lengths of the sides along the centre line of the tube.
-  const alongX = width + section;
-  const alongY = height + section;
-  const perimeter = 2 * (alongX + alongY);
-  const stops = perimeter > 0 ? [0, alongX / perimeter, (alongX + alongY) / perimeter, (2 * alongX + alongY) / perimeter, 1] : [0, 0.25, 0.5, 0.75, 1];
+  const stops = perimeterStops(options);
 
   let p = 0;
   let t = 0;
@@ -107,6 +103,14 @@ export function writeRectFrame(options: Readonly<IRectFrameOptions>, positions: 
     quad(ox0, oy0, back, ox1, oy1, back, ix1, iy1, back, ix0, iy0, back, u0, u1);
     quad(ix0, iy0, front, ix1, iy1, front, ix1, iy1, back, ix0, iy0, back, u0, u1);
   }
+}
+
+/** Where each corner stands along the centre line of the tube, from 0 to 1 around the frame. */
+function perimeterStops(options: Readonly<IRectFrameOptions>): number[] {
+  const alongX = options.width + options.section;
+  const alongY = options.height + options.section;
+  const perimeter = 2 * (alongX + alongY);
+  return perimeter > 0 ? [0, alongX / perimeter, (alongX + alongY) / perimeter, (2 * alongX + alongY) / perimeter, 1] : [0, 0.25, 0.5, 0.75, 1];
 }
 
 /** Normals of a frame: one direction per face, whatever its size. */
@@ -173,4 +177,105 @@ export function createRectFrame(options: Readonly<IRectFrameOptions>): IRectFram
   writeIndices(indices, positions, normals);
   writeRectFrame(options, positions, uvs);
   return { positions, normals, uvs, indices };
+}
+
+// ---------------------------------------------------------------------------
+// Halo
+
+/**
+ * Halo of a rectangular frame: the anchors of what a shader spreads into light
+ * around the tube. It is made of four ribbons, one along the centre line of
+ * each side.
+ *
+ * A vertex holds an end of the centre line of its side, not its final place:
+ * the shader moves it away from there by the radius of the halo, across the
+ * side and across the line of sight, and beyond the end of the side. The
+ * ribbon so faces the eye from every angle, which a flat skirt around the
+ * frame would not, and the shader rounds its ends: two ribbons meet on a
+ * corner with the same round end, centred on that corner.
+ *
+ * - `axes`: direction of the side.
+ * - `offsets`: x is -1 at the start of the side and 1 at its end, y is -1 on
+ *   one edge of the ribbon and 1 on the other.
+ * - `uvs`: u is the coordinate along the frame, the same as on the tube, so
+ *   that a light that travels along the tube travels along its halo too; v is
+ *   the length of the side, which the shader needs to round the ends.
+ *
+ * Only `positions` and `uvs` depend on the size of the frame.
+ */
+export interface IRectFrameHaloGeometry {
+  /** 3 numbers per vertex. */
+  positions: Float32Array;
+  /** 3 numbers per vertex. */
+  axes: Float32Array;
+  /** 2 numbers per vertex. */
+  offsets: Float32Array;
+  /** 2 numbers per vertex. */
+  uvs: Float32Array;
+  indices: Uint16Array;
+}
+
+export const RECT_FRAME_HALO_VERTEX_COUNT = SIDES * 4;
+export const RECT_FRAME_HALO_INDEX_COUNT = SIDES * 6;
+
+/** Which end of the side, and which edge of the ribbon, each of the four vertices of a ribbon stands on. */
+const RIBBON_END = [-1, 1, 1, -1] as const;
+const RIBBON_EDGE = [-1, -1, 1, 1] as const;
+
+/**
+ * Writes the anchors of the halo of a frame, and its texture coordinates when
+ * `uvs` is given, into arrays of `RECT_FRAME_HALO_VERTEX_COUNT` vertices.
+ */
+export function writeRectFrameHalo(options: Readonly<IRectFrameOptions>, positions: Float32Array, uvs?: Float32Array): void {
+  // The centre line of the tube.
+  const x = (options.width + options.section) / 2;
+  const y = (options.height + options.section) / 2;
+  const stops = perimeterStops(options);
+  let p = 0;
+  let t = 0;
+  for (let side = 0; side < SIDES; side++) {
+    const next = (side + 1) % SIDES;
+    const length = side % 2 === 0 ? 2 * x : 2 * y;
+    for (let v = 0; v < 4; v++) {
+      const atEnd = (RIBBON_END[v] as number) > 0;
+      const corner = atEnd ? next : side;
+      positions[p++] = (CORNER_X[corner] as number) * x;
+      positions[p++] = (CORNER_Y[corner] as number) * y;
+      positions[p++] = 0;
+      if (!uvs) continue;
+      uvs[t++] = stops[atEnd ? side + 1 : side] as number;
+      uvs[t++] = length;
+    }
+  }
+}
+
+/** Builds the vertex data of the halo of a frame. */
+export function createRectFrameHalo(options: Readonly<IRectFrameOptions>): IRectFrameHaloGeometry {
+  const positions = new Float32Array(RECT_FRAME_HALO_VERTEX_COUNT * 3);
+  const axes = new Float32Array(RECT_FRAME_HALO_VERTEX_COUNT * 3);
+  const offsets = new Float32Array(RECT_FRAME_HALO_VERTEX_COUNT * 2);
+  const uvs = new Float32Array(RECT_FRAME_HALO_VERTEX_COUNT * 2);
+  const indices = new Uint16Array(RECT_FRAME_HALO_INDEX_COUNT);
+  let a = 0;
+  let o = 0;
+  let i = 0;
+  for (let side = 0; side < SIDES; side++) {
+    const next = (side + 1) % SIDES;
+    // The corners are those of a square here: the direction of a side does not depend on the size of the frame.
+    const dx = ((CORNER_X[next] as number) - (CORNER_X[side] as number)) / 2;
+    const dy = ((CORNER_Y[next] as number) - (CORNER_Y[side] as number)) / 2;
+    for (let v = 0; v < 4; v++) {
+      axes[a++] = dx;
+      axes[a++] = dy;
+      axes[a++] = 0;
+      offsets[o++] = RIBBON_END[v] as number;
+      offsets[o++] = RIBBON_EDGE[v] as number;
+    }
+    // A ribbon faces the eye from both sides of the frame: its winding does not matter, and it is drawn unculled.
+    const first = side * 4;
+    indices[i++] = first; indices[i++] = first + 1; indices[i++] = first + 2;
+    indices[i++] = first; indices[i++] = first + 2; indices[i++] = first + 3;
+  }
+  writeRectFrameHalo(options, positions, uvs);
+  return { positions, axes, offsets, uvs, indices };
 }

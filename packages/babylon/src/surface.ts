@@ -1,12 +1,12 @@
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer.js";
 import type { Material } from "@babylonjs/core/Materials/material.js";
 import type { IColor4Like } from "@babylonjs/core/Maths/math.like.js";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import type { Observer } from "@babylonjs/core/Misc/observable.js";
 import type { Nullable } from "@babylonjs/core/types.js";
 import { applyUvBounds, fitUv, uvBoundsOf, type DisplayFit, type IUvBounds, type IUvTransform } from "@spacexr/spatial-display-core";
 import type { IDisplayChange, ITextureDisplay } from "./display.js";
-import { DisplayMaterial } from "./materials/display-material.js";
+import { DisplayMaterial, type IChromaKey } from "./materials/display-material.js";
 
 export interface IDisplaySurfaceOptions {
   /** 1 (default) shows the image opaque, 0 hides it. */
@@ -24,8 +24,20 @@ export interface IDisplaySurfaceOptions {
   doubleSided?: boolean;
   /** Color of the surface where the image does not reach ("contain"). Default opaque black. */
   border?: Readonly<IColor4Like>;
-  /** Takes the transparency of the image into account. Default false: the image is opaque wherever it shows. */
+  /**
+   * Lets the transparent pixels of the image through. Default: what the
+   * texture of the display says of itself (`texture.hasAlpha`), which a camera
+   * display sets when its background is see-through.
+   */
   useImageAlpha?: boolean;
+  /** A color of the image to let through, as the green of a green screen. Default: none. */
+  chromaKey?: Readonly<IChromaKey>;
+  /**
+   * Draws the surface along with the blended meshes even when it is opaque,
+   * so that a glow around it is drawn before it and never shows over the
+   * image (see `DisplayMaterial.alwaysBlended`). Default false.
+   */
+  alwaysBlended?: boolean;
 }
 
 /**
@@ -35,21 +47,29 @@ export interface IDisplaySurfaceOptions {
  * The image fills the rectangle of the texture space that the mesh uses,
  * whatever that rectangle is: a mesh modelled with its screen mapped on a
  * corner of an atlas shows the whole image on that screen.
+ *
+ * What stands behind the surface shows through it by
+ * `1 - opacity * alpha of the pixel`, the alpha of a pixel being 1 unless the
+ * surface lets the transparent pixels of the image through, or one of its colors.
  */
 export class DisplaySurface {
-  readonly mesh: Mesh;
+  readonly mesh: AbstractMesh;
   readonly material: DisplayMaterial;
 
   private readonly former: Nullable<Material>;
   private readonly bounds: IUvBounds;
   private readonly transform: IUvTransform = { uScale: 1, vScale: 1, uOffset: 0, vOffset: 0 };
+  /** undefined: follows what the texture of the display says. */
+  private imageAlpha: boolean | undefined;
   private _display: ITextureDisplay;
   private _fit: DisplayFit;
   private _aspect: number;
   private observer: Observer<IDisplayChange> | null = null;
   private disposed = false;
 
-  constructor(mesh: Mesh, display: ITextureDisplay, options: Readonly<IDisplaySurfaceOptions> = {}) {
+  constructor(mesh: AbstractMesh, display: ITextureDisplay, options: Readonly<IDisplaySurfaceOptions> = {}) {
+    // An instance draws with the material of its source: it cannot have one of its own.
+    if (mesh.isAnInstance) throw new Error(`spatial-display: "${mesh.name}" is an instance; show the display on its source mesh.`);
     const uvs = mesh.getVerticesData(VertexBuffer.UVKind);
     if (!uvs) throw new Error(`spatial-display: mesh "${mesh.name}" has no texture coordinates, it cannot show a display.`);
     checkSameEngine(mesh, display);
@@ -57,11 +77,13 @@ export class DisplaySurface {
     this.bounds = uvBoundsOf(uvs);
     this._fit = options.fit ?? "stretch";
     this._aspect = options.aspect ?? aspectOf(mesh);
+    this.imageAlpha = options.useImageAlpha;
     this.former = mesh.material;
     this.material = new DisplayMaterial(`${mesh.name}.display`, mesh.getScene());
     this.material.backFaceCulling = !(options.doubleSided ?? false);
     this.material.opacity = options.opacity ?? 1;
-    this.material.useImageAlpha = options.useImageAlpha ?? false;
+    this.material.chromaKey = options.chromaKey ?? null;
+    this.material.alwaysBlended = options.alwaysBlended ?? false;
     if (options.border) this.material.border = options.border;
     mesh.material = this.material;
     this._display = display;
@@ -87,6 +109,25 @@ export class DisplaySurface {
 
   set opacity(value: number) {
     this.material.opacity = value;
+  }
+
+  /** See `IDisplaySurfaceOptions.useImageAlpha`. Set to undefined to follow the texture of the display again. */
+  get useImageAlpha(): boolean {
+    return this.material.useImageAlpha;
+  }
+
+  set useImageAlpha(value: boolean | undefined) {
+    this.imageAlpha = value;
+    this.updateAlpha();
+  }
+
+  /** A color of the image to let through; null for none. */
+  get chromaKey(): Readonly<IChromaKey> | null {
+    return this.material.chromaKey;
+  }
+
+  set chromaKey(value: Readonly<IChromaKey> | null) {
+    this.material.chromaKey = value;
   }
 
   get fit(): DisplayFit {
@@ -120,12 +161,16 @@ export class DisplaySurface {
   private bind(display: ITextureDisplay): void {
     this.material.image = display.texture;
     this.observer = display.onChangedObservable.add((change) => {
-      if (change.kind === "texture") this.material.image = display.texture;
-      else if (change.kind === "resolution") this.update();
+      if (change.kind === "texture") {
+        this.material.image = display.texture;
+        this.updateAlpha();
+      } else if (change.kind === "resolution") this.update();
+      else if (change.kind === "alpha") this.updateAlpha();
       // Nothing is left to show: the mesh gets its own material back.
-      else this.dispose();
+      else if (change.kind === "disposed") this.dispose();
     });
     display.addSurface?.(this.mesh);
+    this.updateAlpha();
     this.update();
   }
 
@@ -133,6 +178,12 @@ export class DisplaySurface {
     if (this.observer) this._display.onChangedObservable.remove(this.observer);
     this.observer = null;
     this._display.removeSurface?.(this.mesh);
+  }
+
+  private updateAlpha(): void {
+    const display = this._display;
+    this.material.premultipliedImage = display.premultipliedAlpha ?? false;
+    this.material.useImageAlpha = this.imageAlpha ?? display.texture.hasAlpha;
   }
 
   private update(): void {
@@ -143,17 +194,17 @@ export class DisplaySurface {
 }
 
 /** Shows `display` on `mesh`. Dispose of the surface returned to give the mesh its material back. */
-export const attachDisplay = (mesh: Mesh, display: ITextureDisplay, options?: Readonly<IDisplaySurfaceOptions>): DisplaySurface =>
+export const attachDisplay = (mesh: AbstractMesh, display: ITextureDisplay, options?: Readonly<IDisplaySurfaceOptions>): DisplaySurface =>
   new DisplaySurface(mesh, display, options);
 
-function checkSameEngine(mesh: Mesh, display: ITextureDisplay): void {
+function checkSameEngine(mesh: AbstractMesh, display: ITextureDisplay): void {
   const source = display.texture.getScene();
   if (source && source.getEngine() !== mesh.getScene().getEngine()) {
     throw new Error("spatial-display: a display shows only on meshes of its own engine. A texture cannot be shared between two rendering contexts.");
   }
 }
 
-function aspectOf(mesh: Mesh): number {
+function aspectOf(mesh: AbstractMesh): number {
   const extend = mesh.getBoundingInfo().boundingBox.extendSize;
   const epsilon = 1e-6 * Math.max(extend.x, extend.y, extend.z);
   const height = extend.y > epsilon ? extend.y : extend.z;
