@@ -31,7 +31,7 @@ npm run example:xray
 npm run example:xray360
 ```
 
-The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
+The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185; add `?polygon` or `?sphere` to start with another surface than the ring. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
 
 ## Use
 
@@ -191,6 +191,8 @@ display.setLens({ scene }); // follow the camera of this scene
 attachDisplay(ring, display);
 ```
 
+Any mesh that has texture coordinates will do. The example has three: the ring, a polygon made of its own vertices, bent and twisted, that circles the machine, and a sphere that closes on a part of it.
+
 - The display draws with a camera of its own, a copy of the one of the viewer: same place, same direction, same projection. The copy is made after Babylon.js has updated the camera of the viewer, in the same frame. The camera given to the display lends its scene and its layer mask, as for a window, and is not moved.
 - The image takes the size of the canvas, so a surface is as sharp as the rest of the screen; `scale` in the lens asks for less, or for more. `resize()` does not hold.
 - A surface reads the image where each of its points lands on screen, not by its texture coordinates: `fit` does not apply. Several surfaces can share a lens, and a portal shows one as any surface does.
@@ -211,7 +213,7 @@ The two materials are written in GLSL and in WGSL, and pick their language from 
 | `npm test` | Vitest, with the null engine of Babylon.js |
 | `npm run example:portal` | the portal example, served by Vite from the sources |
 | `npm run example:xray` | the x-ray example: a window onto its own scene |
-| `npm run example:xray360` | the x-ray 360 example: a lens on a cylinder |
+| `npm run example:xray360` | the x-ray 360 example: a lens on a cylinder, on a polygon that is not flat, on a sphere |
 
 ## State and limits
 

@@ -25,7 +25,7 @@ There is nothing to call in the render loop. A display hooks itself to the engin
 | That camera to belong to a scene the application never renders | the same, with `drive: "display"` |
 | An opening that gives onto another scene, with parallax as the viewer moves | `Portal` with `window: { anchor }` |
 | An opening onto the same scene, drawn differently (x-ray, wireframe, other layers) | one scene, `overrideMaterial` and `layerMask`, `Portal` with `window: true` |
-| The same on a surface that is not flat (a cylinder around an object, a dome, a hand-held glass) | `display.setLens({ scene })` and `attachDisplay(mesh, display)` |
+| The same on a surface that is not flat (a cylinder around an object, a sphere, a bent polygon, a mesh built from `VertexData`) | `display.setLens({ scene })` and `attachDisplay(mesh, display)` |
 | The image on a mesh the application already has (a monitor of a glTF model) | `attachDisplay(mesh, display)` |
 | The image on a material of its own | `material.emissiveTexture = display.texture` |
 | A picture or a video instead of a camera | `TextureDisplay` |
@@ -121,7 +121,7 @@ portal.neon.flow.amplitude = 0.4;                    // waves of light along the
 - **A portal is not in its own image.** Its screen, its frame and its glow are kept out of what its display draws.
 - **Blending.** The screen of a portal is always drawn with the blended meshes, after the glow of its frame, so the glow never covers the image. When opaque, it writes its depth first.
 - **Windows.** `display.windowCamera` is the camera the library places; do not move it. The camera given to the display is not moved either: it lends its scene, its `maxZ` and its `layerMask`. The image always fills the opening, so `fit` is ignored.
-- **Lenses.** `display.setLens({ scene })` makes the display draw what the camera of `scene` sees, with a copy of that camera, `display.lensCamera`; do not move it. A surface then shows the part of the image it covers on screen, whatever its shape: `fit` is ignored, the image takes the size of the canvas (`scale` in the lens changes that) and `display.resize()` does not hold. Nothing is cut in front of a surface: choose what the image holds with `include` and with the layers of the camera given. A display is a screen, a window or a lens, one at a time. For a lens onto another scene, `display.setLens({ scene, root }, anchor)`; both scenes need the same handedness.
+- **Lenses.** `display.setLens({ scene })` makes the display draw what the camera of `scene` sees, with a copy of that camera, `display.lensCamera`; do not move it. A surface then shows the part of the image it covers on screen, whatever its shape: `fit` is ignored, the image takes the size of the canvas (`scale` in the lens changes that) and `display.resize()` does not hold. The mesh can be any that has texture coordinates, closed or open, built by Babylon.js or from the vertices of the application. Nothing is cut in front of a surface: choose what the image holds with `include` and with the layers of the camera given. A display is a screen, a window or a lens, one at a time. For a lens onto another scene, `display.setLens({ scene, root }, anchor)`; both scenes need the same handedness.
 - **Layers.** `WINDOW_LAYER_MASK` (0x10000000) is taken: it holds the light a window sets behind its opening. Use another bit for layers of the application, above the 28 bits (0x0fffffff) Babylon.js gives cameras and meshes by default.
 - **Cost.** Each camera display is one more draw of its source scene. Lower it with `refresh: { hz: 10 }` or `"manual"` plus `display.invalidate()`, with a smaller `resolution`, and leave `pauseWhenHidden` on: a display stops drawing while none of its surfaces is on screen.
 - **Engines.** WebGL2 and WebGPU. The two materials of the library carry their shaders in GLSL and in WGSL.
@@ -183,7 +183,7 @@ npm run typecheck      # packages, tests and examples
 npm test               # Vitest
 npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
 npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
-npm run example:xray360 # http://localhost:5185, add ?webgpu, ?rh
+npm run example:xray360 # http://localhost:5185, add ?polygon, ?sphere, ?webgpu, ?rh
 ```
 
 Run `npm run typecheck` and `npm test` before calling a change done.

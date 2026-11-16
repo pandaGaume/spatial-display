@@ -8,12 +8,15 @@
  *
  * The display is a lens. Its camera copies the one of the viewer, and the
  * wall of the ring shows the part of that image it covers on screen. So the
- * surface can have any shape: here a cylinder, which no flat window could be.
+ * surface can have any shape: a cylinder, which no flat window could be, or
+ * the two other surfaces of this example, a polygon that is bent and twisted
+ * and that circles the machine, and a sphere that closes on a part of it.
  *
  * No mesh is copied: a mesh is drawn solid by the camera of the application
  * and as a wireframe by the lens, from the same vertices.
  *
- * URL: ?webgpu for the WebGPU engine, ?rh for a right-handed scene.
+ * URL: ?polygon or ?sphere to start with that surface, ?webgpu for the
+ * WebGPU engine, ?rh for a right-handed scene.
  */
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
@@ -30,7 +33,9 @@ import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder.js";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder.js";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder.js";
 import { CreateTorusKnot } from "@babylonjs/core/Meshes/Builders/torusKnotBuilder.js";
+import { CreateTube } from "@babylonjs/core/Meshes/Builders/tubeBuilder.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { attachDisplay, CameraDisplay } from "@spacexr/spatial-display-babylon";
@@ -43,6 +48,21 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const HIDDEN_LAYER = 0x20000000;
 const EVERYDAY_LAYERS = 0x0fffffff;
 
+/** The corners of the polygon before it is bent: eight of them, one set back in a notch. x to the right, y upward. */
+const CORNERS: readonly (readonly [number, number])[] = [
+  [0.78, -0.1],
+  [0.52, 0.62],
+  [0.22, 0.38],
+  [0.02, 0.8],
+  [-0.6, 0.55],
+  [-0.8, -0.05],
+  [-0.42, -0.7],
+  [0.35, -0.72],
+];
+
+/** How far a point of the polygon is pushed toward the machine: the sides wrap around it, the sheet is twisted, top and bottom lean back. */
+const bend = (x: number, y: number): number => 0.45 * x * x + 0.3 * x * y - 0.2 * y * y;
+
 async function createEngine(): Promise<AbstractEngine> {
   if (params.has("webgpu")) {
     const { WebGPUEngine } = await import("@babylonjs/core/Engines/webgpuEngine.js");
@@ -51,6 +71,50 @@ async function createEngine(): Promise<AbstractEngine> {
     return engine;
   }
   return new Engine(canvas, true);
+}
+
+/**
+ * A polygon that is not flat, as a mesh of its own vertices: rings of points
+ * from the centre to the sides, each pushed in depth by `depth`. Its front is
+ * toward -z. Returns the mesh and the line of its edge.
+ */
+function createBentPolygon(name: string, scene: Scene, depth: (x: number, y: number) => number): { sheet: Mesh; edge: Vector3[] } {
+  const rings = 8;
+  const perSide = 6;
+  const around = CORNERS.length * perSide;
+  const positions = [0, 0, depth(0, 0)];
+  // A surface needs texture coordinates, even though a lens does not read the image with them.
+  const uvs = [0.5, 0.5];
+  const edge: Vector3[] = [];
+  for (let ring = 1; ring <= rings; ring++) {
+    for (let k = 0; k < around; k++) {
+      const from = CORNERS[Math.floor(k / perSide)] as readonly [number, number];
+      const to = CORNERS[(Math.floor(k / perSide) + 1) % CORNERS.length] as readonly [number, number];
+      const along = (k % perSide) / perSide;
+      const x = (ring / rings) * (from[0] + (to[0] - from[0]) * along);
+      const y = (ring / rings) * (from[1] + (to[1] - from[1]) * along);
+      positions.push(x, y, depth(x, y));
+      uvs.push(0.5 + x / 1.7, 0.5 + y / 1.7);
+      if (ring === rings) edge.push(new Vector3(x, y, depth(x, y)));
+    }
+  }
+  const at = (ring: number, k: number): number => 1 + (ring - 1) * around + (k % around);
+  const indices: number[] = [];
+  for (let k = 0; k < around; k++) {
+    indices.push(0, at(1, k), at(1, k + 1));
+    for (let ring = 1; ring < rings; ring++) {
+      indices.push(at(ring, k), at(ring + 1, k), at(ring + 1, k + 1), at(ring, k), at(ring + 1, k + 1), at(ring, k + 1));
+    }
+  }
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.uvs = uvs;
+  const sheet = new Mesh(name, scene);
+  data.applyToMesh(sheet);
+  // The edge is a closed line.
+  edge.push((edge[0] as Vector3).clone());
+  return { sheet, edge };
 }
 
 async function main(): Promise<void> {
@@ -73,8 +137,10 @@ async function main(): Promise<void> {
   };
 
   // --- What everyone sees: a floor, a few crates, and the hull of a machine.
+  const scenery: AbstractMesh[] = [];
   const ground = CreateGround("ground", { width: 16, height: 16, subdivisions: 16 }, scene);
   ground.material = solid("ground", new Color3(0.2, 0.21, 0.25));
+  scenery.push(ground);
 
   const crates = solid("crates", new Color3(0.75, 0.5, 0.2));
   for (const [i, [x, z, size]] of ([[1.9, 1.2, 0.8], [-2.2, 0.6, 0.6], [0.6, -2.3, 0.7]] as const).entries()) {
@@ -82,6 +148,7 @@ async function main(): Promise<void> {
     crate.position.set(x, size / 2, z);
     crate.rotation.y = 0.4 + i;
     crate.material = crates;
+    scenery.push(crate);
   }
 
   const shell = solid("shell", new Color3(0.56, 0.6, 0.66));
@@ -136,7 +203,7 @@ async function main(): Promise<void> {
   const ring = new TransformNode("ring", scene);
   const wall = CreateCylinder("ring.wall", { diameter: 1, height: 1, tessellation: 64, cap: Mesh.NO_CAP }, scene);
   wall.parent = ring;
-  const light = new StandardMaterial("ring.light", scene);
+  const light = new StandardMaterial("light", scene);
   light.disableLighting = true;
   light.emissiveColor = new Color3(0.55, 0.9, 1);
   const rims = [1, -1].map((side) => {
@@ -145,19 +212,25 @@ async function main(): Promise<void> {
     rim.material = light;
     return { rim, side };
   });
-  const sizeRing = (radius: number, height: number): void => {
-    wall.scaling.set(2 * radius, height, 2 * radius);
-    for (const { rim, side } of rims) {
-      rim.scaling.setAll(2 * radius);
-      rim.position.y = (side * height) / 2;
-    }
-  };
+
+  // --- The polygon: a mesh of its own vertices, bent toward the machine, with a line of light on its edge.
+  // The front of its sheet is toward the -z of the node, which is kept turned away from the machine.
+  const panel = new TransformNode("panel", scene);
+  const { sheet, edge } = createBentPolygon("panel.sheet", scene, bend);
+  sheet.parent = panel;
+  const outline = CreateTube("panel.edge", { path: edge, radius: 0.011, tessellation: 6 }, scene);
+  outline.parent = panel;
+  outline.material = light;
+
+  // --- The sphere: a bubble around a part of the machine. A closed mesh needs nothing more.
+  const bubble = CreateSphere("bubble", { diameter: 1, segments: 32 }, scene);
 
   // --- The lens. This camera is never the camera of the scene: it lends the lens its layers.
   const scanner = new FreeCamera("xray.scanner", Vector3.Zero(), scene, false);
   scanner.layerMask = EVERYDAY_LAYERS | HIDDEN_LAYER;
   // A lens cuts nothing in front of its surface: what its image holds is picked here.
   const machine = new Set<AbstractMesh>([...hull, ...inside]);
+  const around = new Set<AbstractMesh>(scenery);
   let surroundings = false;
   let hullShown = true;
   const background = { r: 0, g: 0.035, b: 0.07, a: 0.86 };
@@ -167,33 +240,69 @@ async function main(): Promise<void> {
     // Not quite opaque: the scene shows through, under the lines drawn of it.
     clearColor: background,
     overrideMaterial: xray,
-    include: (mesh) => (machine.has(mesh) ? hullShown || mesh.layerMask === HIDDEN_LAYER : surroundings && !mesh.name.startsWith("ring.")),
+    include: (mesh) => (machine.has(mesh) ? hullShown || mesh.layerMask === HIDDEN_LAYER : surroundings && around.has(mesh)),
     name: "xray.display",
   });
   // The image is the one of the viewer of this scene, at the size of the canvas.
   display.setLens({ scene });
-  const surface = attachDisplay(wall, display);
+  // One lens, three surfaces: each shows the part of the same image it covers on screen.
+  const surfaces = [wall, sheet, bubble].map((mesh) => attachDisplay(mesh, display));
 
   // --- Controls.
   const input = (id: string): HTMLInputElement => document.getElementById(id) as HTMLInputElement;
   const number = (id: string): number => Number(input(id).value);
-  const resize = (): void => sizeRing(number("radius"), number("band"));
-  resize();
-  ring.position.y = number("y");
-  input("radius").addEventListener("input", resize);
-  input("band").addEventListener("input", resize);
+  const shape = document.getElementById("shape") as HTMLSelectElement;
+  const asked = ["polygon", "sphere"].find((name) => params.has(name));
+  if (asked) shape.value = asked;
+
+  /** Where the polygon stands around the machine, in radians. It starts between the viewer and the machine, a little to one side. */
+  let turn = -2.35;
+  /** Places and sizes the surface that shows, from the sliders. */
+  const place = (): void => {
+    ring.setEnabled(shape.value === "ring");
+    panel.setEnabled(shape.value === "polygon");
+    bubble.setEnabled(shape.value === "sphere");
+    const radius = number("radius");
+    const size = number("size");
+    const height = number("y");
+    // The ring: `size` is the height of its wall.
+    ring.position.y = height;
+    wall.scaling.set(2 * radius, size, 2 * radius);
+    for (const { rim, side } of rims) {
+      rim.scaling.setAll(2 * radius);
+      rim.position.y = (side * size) / 2;
+    }
+    // The polygon: in front of the hull, its -z turned away from the machine. `size` scales it.
+    const distance = radius + 0.4;
+    panel.position.set(distance * Math.sin(turn), height, distance * Math.cos(turn));
+    panel.rotation.y = turn + Math.PI;
+    panel.scaling.setAll(0.5 + 0.67 * size);
+    // The sphere: around the axis of the machine. `size` stretches it upward.
+    bubble.position.y = height;
+    bubble.scaling.set(2 * radius, 2 * radius * (0.5 + 0.67 * size), 2 * radius);
+  };
+  place();
+  shape.addEventListener("change", place);
+  input("radius").addEventListener("input", place);
+  input("size").addEventListener("input", place);
   input("y").addEventListener("input", () => {
     input("scan").checked = false;
-    ring.position.y = number("y");
+    place();
   });
   input("hidden").addEventListener("change", () => (scanner.layerMask = input("hidden").checked ? EVERYDAY_LAYERS | HIDDEN_LAYER : EVERYDAY_LAYERS));
   input("hull").addEventListener("change", () => (hullShown = input("hull").checked));
   input("surroundings").addEventListener("change", () => (surroundings = input("surroundings").checked));
   input("background").addEventListener("input", () => (display.clearColor = { ...background, a: number("background") }));
-  input("opacity").addEventListener("input", () => (surface.opacity = number("opacity")));
-  // With its back face, the wall also shows from the inside: the far half of the ring, seen over the near one.
-  surface.doubleSided = input("back").checked;
-  input("back").addEventListener("change", () => (surface.doubleSided = input("back").checked));
+  const look = (): void => {
+    for (const surface of surfaces) {
+      surface.opacity = number("opacity");
+      // With its back face, a surface also shows from behind: the far half of the ring, seen over the near one.
+      surface.doubleSided = input("back").checked;
+    }
+  };
+  look();
+  input("opacity").addEventListener("input", look);
+  input("back").addEventListener("change", look);
 
   let time = 0;
   scene.onBeforeRenderObservable.add(() => {
@@ -202,8 +311,11 @@ async function main(): Promise<void> {
     rotor.rotation.y -= seconds * 1.7;
     if (!input("scan").checked) return;
     time += seconds;
-    ring.position.y = 1.4 + 1.05 * Math.sin(time * 0.6);
-    input("y").value = String(ring.position.y);
+    // The ring and the sphere go up and down the whole machine; the polygon also circles it.
+    const polygon = shape.value === "polygon";
+    if (polygon) turn += seconds * 0.35;
+    input("y").value = String(polygon ? 1.4 + 0.6 * Math.sin(time * 0.6) : 1.4 + 1.05 * Math.sin(time * 0.6));
+    place();
   });
 
   const status = document.getElementById("status") as HTMLElement;
@@ -216,7 +328,7 @@ async function main(): Promise<void> {
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, scene, camera, scanner, display, surface, ring, wall, knot, hull, inside, Vector3, HIDDEN_LAYER });
+  Object.assign(window, { engine, scene, camera, scanner, display, surfaces, ring, wall, panel, sheet, bubble, knot, hull, inside, Vector3, HIDDEN_LAYER });
 }
 
 void main();

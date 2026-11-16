@@ -5,6 +5,9 @@ import { NullEngine } from "@babylonjs/core/Engines/nullEngine.js";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder.js";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder.js";
+import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder.js";
+import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { attachDisplay, CameraDisplay, Portal, type DisplayChangeKind } from "@spacexr/spatial-display-babylon";
@@ -162,6 +165,40 @@ describe("lens mode", () => {
 
     display.dispose();
     expect(world.cameras.map((camera) => camera.name)).not.toContain("display.lens");
+  });
+
+  it("shows on a mesh of any shape: one made of its own vertices, a closed one", () => {
+    const engine = makeEngine();
+    const { scene, scanner } = makeScene(engine);
+    const display = new CameraDisplay({ camera: scanner });
+    display.setLens({ scene });
+
+    // Four corners that are not in one plane.
+    const data = new VertexData();
+    data.positions = [-1, -1, 0, 1, -1, 0.4, 1, 1, -0.3, -1, 1, 0.6];
+    data.indices = [0, 1, 2, 0, 2, 3];
+    data.uvs = [0, 0, 1, 0, 1, 1, 0, 1];
+    const sheet = new Mesh("sheet", scene);
+    data.applyToMesh(sheet);
+    const bubble = CreateSphere("bubble", { diameter: 2 }, scene);
+
+    const surfaces = [sheet, bubble].map((mesh) => attachDisplay(mesh, display, { doubleSided: true }));
+    for (const surface of surfaces) {
+      expect(surface.material.projector).toBe(display.imageTransform);
+      expect(surface.doubleSided).toBe(true);
+      expect(display.texture.renderListPredicate(surface.mesh)).toBe(false);
+    }
+    frame(engine, scene);
+    // One image serves them all.
+    expect(scene.customRenderTargets).toHaveLength(1);
+
+    // The texture coordinates are not read by a lens, yet a surface asks for them.
+    const bare = new Mesh("bare", scene);
+    const positions = new VertexData();
+    positions.positions = data.positions;
+    positions.indices = data.indices;
+    positions.applyToMesh(bare);
+    expect(() => attachDisplay(bare, display)).toThrow(/texture coordinates/);
   });
 
   it("is either a lens or a window", () => {
