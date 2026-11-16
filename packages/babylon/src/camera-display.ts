@@ -13,7 +13,7 @@ import { Observable, type Observer } from "@babylonjs/core/Misc/observable.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import type { Nullable } from "@babylonjs/core/types.js";
 import { Display, RefreshClock, windowFrustum, windowProjection, type DisplayRefresh, type ISize2 } from "@spacexr/spatial-display-core";
-import { WINDOW_LAYER_MASK, type IDisplayChange, type IDisplayWindow, type ITextureDisplay } from "./display.js";
+import { WINDOW_LAYER_MASK, type IDisplayChange, type IDisplayLens, type IDisplayWindow, type ITextureDisplay } from "./display.js";
 import { SourceHub, type ISourceHubClient } from "./source-hub.js";
 
 /**
@@ -97,6 +97,18 @@ interface IWindowState {
   observer: Observer<Scene> | null;
 }
 
+/** What a display holds while it is a lens. */
+interface ILensState {
+  lens: IDisplayLens;
+  anchor: TransformNode | null;
+  /** The camera that copies the one of the viewer, in the scene the display shows. */
+  camera: TargetCamera;
+  projection: Matrix;
+  /** From the world of the viewer to their screen: what a surface reads the image with. */
+  transform: Matrix;
+  observer: Observer<Scene> | null;
+}
+
 /** The near plane of a window is the plane of its opening, by a hair: what the camera draws starts on the opening. */
 const WINDOW_NEAR_RATIO = 0.999;
 /** Closer than this to the plane of the opening, the near plane stops following the eye. */
@@ -105,7 +117,10 @@ const WINDOW_MIN_NEAR = 0.005;
 const WINDOW_DEFAULT_FAR = 10000;
 
 const TMP_MATRIX = new Matrix();
+const TMP_WORLD = new Matrix();
 const TMP_EYE = new Vector3();
+const TMP_SCALE = new Vector3();
+const UP = new Vector3(0, 1, 0);
 const TMP_PROJECTION = new Array<number>(16).fill(0);
 
 /** A surface drawn this many frames ago still counts as on screen: scenes are not all rendered at every frame. */
@@ -127,6 +142,13 @@ const DEFAULT_RESOLUTION: Readonly<ISize2> = { width: 1280, height: 720 };
  * eye of the viewer; the camera it was given only lends its scene, its far
  * plane and its layer mask. One image is drawn, for the camera of the scene
  * the opening stands in: in a headset both eyes get that same image.
+ *
+ * `setLens` makes it the image of a lens: what the viewer sees, drawn as the
+ * display draws it. The camera of the display copies the one of the viewer,
+ * and a surface shows the part of the image it covers on screen, whatever its
+ * shape. Nothing is cut in front of the surface, as the plane of a window
+ * does: what the image shows is chosen by the layers of the camera given and
+ * by `include`.
  */
 export class CameraDisplay extends Display implements ITextureDisplay, ISourceHubClient {
   readonly onChangedObservable = new Observable<IDisplayChange>();
@@ -153,7 +175,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   private overridden = false;
   private hub: SourceHub;
   private windowState: IWindowState | null = null;
-  /** In window mode the image is drawn once the viewer is known for the frame: whether it is due waits until then. */
+  private lensState: ILensState | null = null;
+  /** A window and a lens are drawn once the viewer is known for the frame: whether the image is due waits until then. */
   private windowDue = false;
   private sceneDisposeObserver: Observer<Scene> | null = null;
   private disposed = false;
@@ -240,8 +263,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     const scene = value.getScene();
     if (scene === this._camera.getScene()) {
       this._camera = value;
-      // A window keeps drawing with its own camera.
-      if (!this.windowState) this._texture.activeCamera = value;
+      // A window and a lens keep drawing with their own camera.
+      if (!this.windowState && !this.lensState) this._texture.activeCamera = value;
       this.clock.invalidate();
       return;
     }
@@ -250,12 +273,15 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     }
     // A render target belongs to the scene it draws, and so does the camera of a window. Its anchor stays behind.
     const window = this.windowState?.window ?? null;
+    const lens = this.lensState?.lens ?? null;
     this.clearWindow();
+    this.clearLens();
     this.detachSource();
     this._camera = value;
     this._texture = this.createTexture(value);
     this.hub = this.attachSource(scene);
     if (window) this.setWindow(window);
+    else if (lens) this.setLens(lens);
     this.clock.invalidate();
     this.onChangedObservable.notifyObservers({ kind: "texture" });
   }
@@ -270,9 +296,55 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     return this.windowState?.camera ?? null;
   }
 
+  /** Whose eye the display follows as a lens; null while it is not one. */
+  get lens(): IDisplayLens | null {
+    return this.lensState?.lens ?? null;
+  }
+
+  /** The camera a lens draws with, which copies the one of its viewer; null while the display is not a lens. */
+  get lensCamera(): Camera | null {
+    return this.lensState?.camera ?? null;
+  }
+
+  /** See `ITextureDisplay.imageTransform`: a matrix while the display is a lens, else null. */
+  get imageTransform(): Matrix | null {
+    return this.lensState?.transform ?? null;
+  }
+
+  /** See `ITextureDisplay.setLens`. */
+  setLens(lens: IDisplayLens | null, anchor: TransformNode | null = null): void {
+    if (this.disposed) return;
+    const was = this.lensState !== null;
+    this.clearWindow();
+    this.clearLens();
+    if (lens) {
+      const scene = this._camera.getScene();
+      if (anchor && anchor.getScene() !== scene) throw new Error("spatial-display: the anchor of a lens belongs to the scene its display shows.");
+      if (lens.scene.getEngine() !== scene.getEngine()) throw new Error("spatial-display: a lens follows a viewer of its own engine.");
+      // The rotation and the projection of the viewer are copied as they are: they fit a scene of the same handedness only.
+      if (lens.scene.useRightHandedSystem !== scene.useRightHandedSystem) {
+        throw new Error("spatial-display: a lens and the scene its display shows have the same handedness.");
+      }
+      const camera = new TargetCamera(`${this.name}.lens`, Vector3.Zero(), scene, false);
+      camera.rotationQuaternion = new Quaternion();
+      camera.doNotSerialize = true;
+      // The same matrix is rewritten at every frame.
+      const projection = new Matrix();
+      camera.freezeProjectionMatrix(projection);
+      this._texture.activeCamera = camera;
+      const state: ILensState = { lens, anchor, camera, projection, transform: Matrix.Identity(), observer: null };
+      // Babylon.js updates its cameras before this is notified: the viewer is the one of the frame about to be drawn.
+      state.observer = lens.scene.onBeforeRenderObservable.add(() => this.updateLens());
+      this.lensState = state;
+    }
+    this.clock.invalidate();
+    if (was !== (this.lensState !== null)) this.onChangedObservable.notifyObservers({ kind: "mapping" });
+  }
+
   /** See `ITextureDisplay.setWindow`. */
   setWindow(window: IDisplayWindow | null, anchor: TransformNode | null = null): void {
     if (this.disposed) return;
+    if (this.lensState) this.setLens(null);
     this.clearWindow();
     if (!window) {
       this.clock.invalidate();
@@ -339,8 +411,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   /** @internal Called by the hub of the source scene at the beginning of every frame. */
   prepareFrame(deltaSeconds: number, frameId: number): boolean {
     const due = this.decide(deltaSeconds, frameId);
-    if (!this.windowState) return due;
-    // A window is drawn later in the frame, once the place of its viewer is known.
+    if (!this.windowState && !this.lensState) return due;
+    // A window and a lens are drawn later in the frame, once the place of their viewer is known.
     this.windowDue = due;
     return false;
   }
@@ -349,7 +421,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   private decide(deltaSeconds: number, frameId: number): boolean {
     const texture = this._texture;
     const active = !this.paused && this.isWatched(frameId);
-    if (active && !this.windowState) {
+    if (active && !this.windowState && !this.lensState) {
       // Babylon.js updates the cameras it renders the scene with, and no other.
       const scene = this._camera.getScene();
       if (scene.activeCamera !== this._camera && !scene.activeCameras?.includes(this._camera)) this._camera.update();
@@ -377,6 +449,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     this.disposed = true;
     for (const mesh of [...this.surfaces.keys()]) this.removeSurface(mesh);
     this.clearWindow();
+    this.clearLens();
     this.detachSource();
     this.onChangedObservable.notifyObservers({ kind: "disposed" });
     this.onChangedObservable.clear();
@@ -391,6 +464,64 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     if (state.observer) state.host.onBeforeRenderObservable.remove(state.observer);
     this._texture.activeCamera = this._camera;
     state.camera.dispose();
+  }
+
+  /** No longer a lens: the display draws with the camera it was given. */
+  private clearLens(): void {
+    const state = this.lensState;
+    if (!state) return;
+    this.lensState = null;
+    this.windowDue = false;
+    if (state.observer) state.lens.scene.onBeforeRenderObservable.remove(state.observer);
+    this._texture.activeCamera = this._camera;
+    state.camera.dispose();
+  }
+
+  /**
+   * Makes the camera of the lens a copy of the one of the viewer: same place,
+   * same direction, same projection, and an image of the size of their screen.
+   * Then draws the image, for a scene the display renders itself.
+   */
+  private updateLens(): void {
+    const state = this.lensState;
+    if (!state || this.disposed) return;
+    const { lens, anchor, camera } = state;
+    const viewer = lens.scene.activeCamera;
+    if (!viewer) return;
+
+    // The image is the screen of the viewer: it has its proportions, which the projection copied below needs.
+    const engine = lens.scene.getEngine();
+    const scale = Math.min(2, Math.max(0.1, lens.scale ?? 1));
+    const width = engine.getRenderWidth() * viewer.viewport.width * scale;
+    const height = engine.getRenderHeight() * viewer.viewport.height * scale;
+    // Never above what the engine can allocate.
+    const fit = Math.min(1, engine.getCaps().maxTextureSize / Math.max(width, height, 1));
+    this.resize(width * fit, height * fit);
+
+    // Where the viewer stands, brought from the frame of `lens.root` to the frame of the anchor when they are given.
+    let world = viewer.getWorldMatrix();
+    if (lens.root) {
+      lens.root.computeWorldMatrix(true).invertToRef(TMP_MATRIX);
+      world = world.multiplyToRef(TMP_MATRIX, TMP_WORLD);
+    }
+    if (anchor) world = world.multiplyToRef(anchor.computeWorldMatrix(true), TMP_MATRIX);
+    const rotation = camera.rotationQuaternion as Quaternion;
+    // The rotation of a world matrix is the rotation of its camera as it is: a camera of a right-handed scene looks along its -z.
+    world.decompose(TMP_SCALE, rotation, camera.position);
+    // Babylon.js works out the up of a camera from its rotation only now and then: given here, a viewer who rolls is followed.
+    UP.rotateByQuaternionToRef(rotation, camera.upVector);
+
+    state.projection.copyFrom(viewer.getProjectionMatrix());
+    camera.minZ = viewer.minZ;
+    camera.maxZ = viewer.maxZ;
+    camera.layerMask = this._camera.layerMask;
+    // A point of a surface is read in the image where the viewer sees it: their own transform, whatever the anchor.
+    viewer.getViewMatrix().multiplyToRef(viewer.getProjectionMatrix(), state.transform);
+
+    if (this.windowDue && this.driven) {
+      this.windowDue = false;
+      this.hub.render();
+    }
   }
 
   /**

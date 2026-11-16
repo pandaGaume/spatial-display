@@ -25,6 +25,7 @@ There is nothing to call in the render loop. A display hooks itself to the engin
 | That camera to belong to a scene the application never renders | the same, with `drive: "display"` |
 | An opening that gives onto another scene, with parallax as the viewer moves | `Portal` with `window: { anchor }` |
 | An opening onto the same scene, drawn differently (x-ray, wireframe, other layers) | one scene, `overrideMaterial` and `layerMask`, `Portal` with `window: true` |
+| The same on a surface that is not flat (a cylinder around an object, a dome, a hand-held glass) | `display.setLens({ scene })` and `attachDisplay(mesh, display)` |
 | The image on a mesh the application already has (a monitor of a glTF model) | `attachDisplay(mesh, display)` |
 | The image on a material of its own | `material.emissiveTexture = display.texture` |
 | A picture or a video instead of a camera | `TextureDisplay` |
@@ -58,16 +59,25 @@ const HIDDEN = 0x20000000;
 pipes.layerMask = HIDDEN;
 
 // Never the camera of the scene: it lends the display its layers and its far plane.
-const lens = new FreeCamera("lens", Vector3.Zero(), scene, false);
-lens.layerMask = 0x0fffffff | HIDDEN;
+const scanner = new FreeCamera("scanner", Vector3.Zero(), scene, false);
+scanner.layerMask = 0x0fffffff | HIDDEN;
 
 const wire = new StandardMaterial("wire", scene);
 wire.wireframe = true;
 wire.disableLighting = true;
 wire.emissiveColor = new Color3(0.25, 0.95, 1);
 
-const display = new CameraDisplay({ camera: lens, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 }, samples: 4 });
+const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 }, samples: 4 });
 const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: true });
+```
+
+An x-ray all around an object, in one scene. The surface is any mesh, here an open cylinder; it shows what the viewer sees through it, drawn as the display draws it:
+
+```ts
+const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.85 }, samples: 4, include: (mesh) => machine.has(mesh) });
+display.setLens({ scene });                          // follow the camera of this scene; setLens(null) undoes it
+const ring = CreateCylinder("ring", { diameter: 1.7, height: 0.8, tessellation: 64, cap: Mesh.NO_CAP }, scene);
+const surface = attachDisplay(ring, display, { doubleSided: true }); // the inside of the wall shows the image too
 ```
 
 Any mesh as a screen, and back:
@@ -104,12 +114,14 @@ portal.neon.flow.amplitude = 0.4;                    // waves of light along the
 
 - **Two sizes.** `portal.setDimension(width, height)` sizes the opening, in world units. `portal.resize(width, height)` sizes the image, in pixels, and resizes the display. `portal.width` and `portal.height` are in world units. Do not scale `portal.root`: it would thicken the frame.
 - **Placement.** Position, rotate and parent `portal.root`. Facing the front of a portal, its local x reads to the right and y upward. The front looks toward -z in a left-handed scene and toward +z in a right-handed one. The image shows on the front only, unless `doubleSided`.
+- **Faces.** A surface shows the image on the front faces of its mesh. `doubleSided`, an option of `attachDisplay` and of `Portal`, adds the back faces: the back of a flat mesh, where the image reads mirrored, and the inside of a hollow one. It can change at any time: `surface.doubleSided`, `portal.doubleSided`. The back faces are drawn first, in a pass of their own.
 - **Ownership.** A portal does not own its display, and a display may feed several surfaces. Dispose of each: `portal.dispose()`, `surface.dispose()`, `display.dispose()`. Disposing of a display empties the portals and surfaces that showed it. A display disposes of itself when its source scene is disposed.
 - **One engine.** The scene of the camera and the scene of the surface must share an engine. `attachDisplay` and the `camera` setter throw otherwise.
 - **Who renders the source scene.** `drive: "app"` (default) expects the application to render it. `drive: "display"` renders it off the canvas, once per frame. Use `"display"` for a scene that exists only to be looked at through displays; using it for a scene the application also renders draws that scene twice, and logs a warning.
 - **A portal is not in its own image.** Its screen, its frame and its glow are kept out of what its display draws.
 - **Blending.** The screen of a portal is always drawn with the blended meshes, after the glow of its frame, so the glow never covers the image. When opaque, it writes its depth first.
 - **Windows.** `display.windowCamera` is the camera the library places; do not move it. The camera given to the display is not moved either: it lends its scene, its `maxZ` and its `layerMask`. The image always fills the opening, so `fit` is ignored.
+- **Lenses.** `display.setLens({ scene })` makes the display draw what the camera of `scene` sees, with a copy of that camera, `display.lensCamera`; do not move it. A surface then shows the part of the image it covers on screen, whatever its shape: `fit` is ignored, the image takes the size of the canvas (`scale` in the lens changes that) and `display.resize()` does not hold. Nothing is cut in front of a surface: choose what the image holds with `include` and with the layers of the camera given. A display is a screen, a window or a lens, one at a time. For a lens onto another scene, `display.setLens({ scene, root }, anchor)`; both scenes need the same handedness.
 - **Layers.** `WINDOW_LAYER_MASK` (0x10000000) is taken: it holds the light a window sets behind its opening. Use another bit for layers of the application, above the 28 bits (0x0fffffff) Babylon.js gives cameras and meshes by default.
 - **Cost.** Each camera display is one more draw of its source scene. Lower it with `refresh: { hz: 10 }` or `"manual"` plus `display.invalidate()`, with a smaller `resolution`, and leave `pauseWhenHidden` on: a display stops drawing while none of its surfaces is on screen.
 - **Engines.** WebGL2 and WebGPU. The two materials of the library carry their shaders in GLSL and in WGSL.
@@ -125,6 +137,7 @@ Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; d
 | Render target named after the display (`name` option, default `display`) in `customRenderTargets` | of the camera | always |
 | Camera `spatial-display.driver`, which draws nothing | of the camera | `drive: "display"` |
 | Camera `<display name>.window` | of the camera | window mode |
+| Camera `<display name>.lens` | of the camera | lens mode |
 | Mesh and material `<name>.worldGlow`, on `WINDOW_LAYER_MASK` | of the camera | window mode, unless `window: { glow: false }` |
 
 ### When something looks wrong
@@ -140,6 +153,9 @@ Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; d
 | The glow does not show over the image | By design. It shows around the opening, and through a see-through image. |
 | A transparent object behind a portal is drawn over it | Blended meshes are sorted by distance. Move the object, or give it a lower `alphaIndex`. |
 | Standard materials fail to compile, with HTML in the shader source | A Vite dev server bundled Babylon.js in several passes. Add `optimizeDeps: { exclude: ["@babylonjs/core"] }`, as `examples/vite.base.ts` does. |
+| A lens shows meshes that stand in front of its surface | By design: a lens cuts nothing. Keep those meshes out of the image with `include`, or with a layer the camera given does not have. |
+| A surface shows nothing from behind or from the inside, or the far wall of a hollow surface is missing | The image shows on the front faces of a mesh. Set `doubleSided`, at creation or later with `surface.doubleSided = true`. |
+| `setLens` throws | The anchor is not in the scene the display shows, or the two scenes differ in handedness or in engine. |
 | Wireframe lines of an x-ray are faint | They are one pixel wide in the image of the display. Lower its `resolution` toward the size of the screen on the canvas. |
 
 ### Not available
@@ -147,7 +163,8 @@ Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; d
 Do not promise these to a user, and do not look for them in the API:
 
 - Pointer input through a surface to the scene behind it.
-- A separate image for each eye in window mode. In a headset both eyes get the image drawn for the camera of the scene.
+- A separate image for each eye in window mode and in lens mode. In a headset both eyes get the image drawn for the camera of the scene.
+- A plane that cuts the image of a lens at its surface, as the opening of a window does.
 - A portal that shows in itself.
 - Fog, clip planes and instances in the materials of the screen and of the frame. For those, give `display.texture` to a material of the application.
 - A source scene that uses `scene.activeCameras` with `drive: "display"`.
@@ -166,6 +183,7 @@ npm run typecheck      # packages, tests and examples
 npm test               # Vitest
 npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
 npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
+npm run example:xray360 # http://localhost:5185, add ?webgpu, ?rh
 ```
 
 Run `npm run typecheck` and `npm test` before calling a change done.
@@ -180,14 +198,14 @@ packages/core/src       no dependency, no rendering library, no DOM
   projection/           off-axis projection of a window
   temporal/             refresh clock
 packages/babylon/src    the Babylon.js adapter
-  camera-display.ts     CameraDisplay: screen and window
+  camera-display.ts     CameraDisplay: screen, window and lens
   texture-display.ts    TextureDisplay
   surface.ts            DisplaySurface, attachDisplay
   portal.ts             Portal
   source-hub.ts         per-scene beat of the frame, rendering of driven scenes
   materials/            DisplayMaterial, NeonMaterial, their shaders
 tests/core, tests/babylon
-examples/portal, examples/xray, examples/vite.base.ts
+examples/portal, examples/xray, examples/xray360, examples/vite.base.ts
 ```
 
 ### Conventions

@@ -1,7 +1,9 @@
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture.js";
+import type { Matrix } from "@babylonjs/core/Maths/math.vector.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Observable } from "@babylonjs/core/Misc/observable.js";
+import type { Scene } from "@babylonjs/core/scene.js";
 import type { IDisplay } from "@spacexr/spatial-display-core";
 
 /**
@@ -9,9 +11,10 @@ import type { IDisplay } from "@spacexr/spatial-display-core";
  * - "resolution": the size of the image.
  * - "texture": `texture` is another object; what samples it has to take the new one.
  * - "alpha": the image got see-through parts, or lost them (`texture.hasAlpha`).
+ * - "mapping": the way a surface reads the image changed (`imageTransform`).
  * - "disposed": the display is gone, and its texture with it.
  */
-export type DisplayChangeKind = "resolution" | "texture" | "alpha" | "disposed";
+export type DisplayChangeKind = "resolution" | "texture" | "alpha" | "mapping" | "disposed";
 
 export interface IDisplayChange {
   kind: DisplayChangeKind;
@@ -27,6 +30,19 @@ export interface IDisplayWindow {
   /** Size of the opening, in the units of `root`. */
   readonly width: number;
   readonly height: number;
+}
+
+/**
+ * Whose eye a display follows as a lens: the camera of `scene`. With `root`,
+ * a node of that scene, the place of the viewer is taken in the frame of that
+ * node, which the anchor of the lens then stands for in the scene the display
+ * shows.
+ */
+export interface IDisplayLens {
+  readonly scene: Scene;
+  readonly root?: TransformNode;
+  /** Size of the image against the screen of the viewer, from 0.1 to 2. Default 1: one pixel of image for one of screen. */
+  readonly scale?: number;
 }
 
 /**
@@ -61,6 +77,22 @@ export interface ITextureDisplay extends IDisplay {
    * turns the display back into a screen.
    */
   setWindow?(window: IDisplayWindow | null, anchor?: TransformNode | null): void;
+  /**
+   * Makes the display a lens: its image is what the viewer sees, drawn as the
+   * display draws it, and a surface shows the part of that image it covers on
+   * screen. The surface may have any shape: a cylinder around an object shows
+   * it from every side. `anchor`, a node of the scene the display shows,
+   * stands there for `lens.root`. null for `lens` turns the display back into
+   * a screen.
+   */
+  setLens?(lens: IDisplayLens | null, anchor?: TransformNode | null): void;
+  /**
+   * How a surface reads the image. null or left out: by its own texture
+   * coordinates. A matrix: by where each of its points lands once projected
+   * with it, from world space to the image; it is rewritten in place at every
+   * frame.
+   */
+  readonly imageTransform?: Matrix | null;
   /**
    * Tells the display that `mesh` shows it. A display uses that to stop
    * drawing while none of its surfaces is on screen, and to keep a surface out

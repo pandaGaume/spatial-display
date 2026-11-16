@@ -321,4 +321,26 @@ describe("transparency of displays", () => {
     surface.chromaKey = null;
     expect(surface.material.needAlphaBlending()).toBe(false);
   });
+
+  it("shows the image on the back faces of a mesh when asked, at any time", () => {
+    const engine = makeEngine();
+    const { scene, camera, box } = makeScene(engine, "scene");
+    const display = new CameraDisplay({ camera });
+    const surface = attachDisplay(box, display);
+    expect(surface.doubleSided).toBe(false);
+    expect(surface.material.backFaceCulling).toBe(true);
+    expect(surface.material.separateCullingPass).toBe(false);
+
+    // Both faces, the ones turned away from the eye first: the far wall of a hollow mesh shows behind the near one.
+    surface.doubleSided = true;
+    expect(surface.material.backFaceCulling).toBe(false);
+    expect(surface.material.separateCullingPass).toBe(true);
+
+    surface.doubleSided = false;
+    expect(surface.material.backFaceCulling).toBe(true);
+    expect(surface.material.separateCullingPass).toBe(false);
+
+    const plane = CreatePlane("plane", { size: 1 }, scene);
+    expect(attachDisplay(plane, display, { doubleSided: true }).doubleSided).toBe(true);
+  });
 });

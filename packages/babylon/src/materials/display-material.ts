@@ -4,7 +4,7 @@ import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial.js";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture.js";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color.js";
 import type { IColor3Like, IColor4Like } from "@babylonjs/core/Maths/math.like.js";
-import { Vector2, Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector.js";
+import { Matrix, Vector2, Vector3, Vector4 } from "@babylonjs/core/Maths/math.vector.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import type { IUvTransform } from "@spacexr/spatial-display-core";
 import { DISPLAY_FRAGMENT_GLSL, DISPLAY_FRAGMENT_WGSL, DISPLAY_VERTEX_GLSL, DISPLAY_VERTEX_WGSL } from "./shaders.js";
@@ -37,6 +37,9 @@ export interface IChromaKey {
 /** A key color has a hue when its strongest channels stand this far above the others. */
 const HUE_MARGIN = 0.2;
 
+/** What the shader multiplies by while the image is read by the texture coordinates of the mesh. */
+const NO_PROJECTOR = Matrix.Identity();
+
 /**
  * Material of a surface that shows a display: the image as it is, with no
  * lighting, placed in the texture space of the mesh by a transform of its own.
@@ -59,6 +62,7 @@ export class DisplayMaterial extends ShaderMaterial {
   private readonly keyRange = new Vector3(0, 1, 0);
   private readonly keyMask = new Vector4(0, 0, 0, 0);
   private _opacity = 1;
+  private _projector: Matrix | null = null;
   private _chromaKey: Readonly<IChromaKey> | null = null;
   private _alwaysBlended = false;
 
@@ -70,7 +74,7 @@ export class DisplayMaterial extends ShaderMaterial {
       webgpu ? { vertexSource: DISPLAY_VERTEX_WGSL, fragmentSource: DISPLAY_FRAGMENT_WGSL } : { vertexSource: DISPLAY_VERTEX_GLSL, fragmentSource: DISPLAY_FRAGMENT_GLSL },
       {
         attributes: ["position", "uv"],
-        uniforms: ["worldViewProjection", "uvTransform", "opacity", "imageAlpha", "border", "keyColor", "keyRange", "keyMask"],
+        uniforms: ["world", "worldViewProjection", "projector", "projected", "uvTransform", "opacity", "imageAlpha", "border", "keyColor", "keyRange", "keyMask"],
         samplers: ["displayTexture"],
         shaderLanguage: webgpu ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
       },
@@ -85,6 +89,25 @@ export class DisplayMaterial extends ShaderMaterial {
     this.setColor3("keyColor", this.keyColor);
     this.setVector3("keyRange", this.keyRange);
     this.setVector4("keyMask", this.keyMask);
+    this.setMatrix("projector", NO_PROJECTOR);
+    this.setFloat("projected", 0);
+  }
+
+  /**
+   * How the image is read: by the texture coordinates of the mesh (null), or
+   * where each point of the mesh lands once projected with this matrix, from
+   * world space to the image. The matrix is kept, not copied: it can be
+   * rewritten in place at every frame.
+   */
+  get projector(): Matrix | null {
+    return this._projector;
+  }
+
+  set projector(value: Matrix | null) {
+    this._projector = value;
+    // Without one the shader still multiplies by a matrix, and drops the result.
+    this.setMatrix("projector", value ?? NO_PROJECTOR);
+    this.setFloat("projected", value ? 1 : 0);
   }
 
   /** The texture of the display. */

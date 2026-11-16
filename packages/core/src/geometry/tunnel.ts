@@ -5,7 +5,7 @@
  *
  * A portal sets them on the far side of its opening, with a light that fades
  * along their depth: seen through the opening they give the glow of the frame
- * a depth, the wall away from the viewer showing more than the one on his side.
+ * a depth, the wall away from the viewer showing more than the one on their side.
  *
  * Texture coordinates: u runs once around the opening, from 0 to 1; v runs
  * along the depth, from 0 on the opening to 1 at the end of the walls.

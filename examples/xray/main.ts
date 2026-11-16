@@ -142,12 +142,12 @@ async function main(): Promise<void> {
   const xray = (mesh: AbstractMesh): StandardMaterial => (mesh.layerMask === HIDDEN_LAYER ? hiddenWire : seenWire);
 
   // --- The screen. This camera is never the camera of the scene: it lends the screen its layers and its far plane.
-  const lens = new FreeCamera("xray.lens", Vector3.Zero(), scene, false);
-  lens.layerMask = EVERYDAY_LAYERS | HIDDEN_LAYER;
-  lens.maxZ = 60;
+  const scanner = new FreeCamera("xray.scanner", Vector3.Zero(), scene, false);
+  scanner.layerMask = EVERYDAY_LAYERS | HIDDEN_LAYER;
+  scanner.maxZ = 60;
   const background = { r: 0, g: 0.035, b: 0.07, a: 0.82 };
   const display = new CameraDisplay({
-    camera: lens,
+    camera: scanner,
     resolution: { width: 1280, height: 800 },
     samples: 4,
     // Not quite opaque: the scene shows through, under the lines drawn of it.
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
 
   // --- Controls.
   const input = (id: string): HTMLInputElement => document.getElementById(id) as HTMLInputElement;
-  input("hidden").addEventListener("change", () => (lens.layerMask = input("hidden").checked ? EVERYDAY_LAYERS | HIDDEN_LAYER : EVERYDAY_LAYERS));
+  input("hidden").addEventListener("change", () => (scanner.layerMask = input("hidden").checked ? EVERYDAY_LAYERS | HIDDEN_LAYER : EVERYDAY_LAYERS));
   input("wire").addEventListener("change", () => (display.overrideMaterial = input("wire").checked ? xray : null));
   input("background").addEventListener("input", () => (display.clearColor = { ...background, a: Number(input("background").value) }));
   input("x").addEventListener("input", () => {
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, scene, camera, lens, display, portal, knot, wall, hidden, Vector3, HIDDEN_LAYER });
+  Object.assign(window, { engine, scene, camera, scanner, display, portal, knot, wall, hidden, Vector3, HIDDEN_LAYER });
 }
 
 void main();

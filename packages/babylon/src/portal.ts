@@ -31,7 +31,7 @@ import { DisplaySurface, type IDisplaySurfaceOptions } from "./surface.js";
  * The glow of the frame on the far side of a window: walls of light that run
  * from the edges of the opening straight into the world behind it, as the
  * inside of a box. Seen through the opening they give the glow a depth: the
- * wall away from the viewer shows more than the one on his side.
+ * wall away from the viewer shows more than the one on their side.
  */
 export interface IPortalWorldGlowOptions {
   /** How far the walls run into the world, in the units of the opening. Default: twice the size of the glow of the frame. */
@@ -64,7 +64,7 @@ export interface IPortalOptions {
   /**
    * Makes the portal a window: its image is what the viewer sees through the
    * opening, as if it gave onto the scene of its display, and follows the
-   * viewer as he moves. It needs a display that can be a window, as a
+   * viewer as they move. It needs a display that can be a window, as a
    * `CameraDisplay`; with another one the portal stays a screen. The image
    * then always fills the opening: `fit` does not apply. Default: a screen.
    */
@@ -364,6 +364,16 @@ export class Portal extends PhysicalDisplay {
   set opacity(value: number) {
     this.surfaceOptions.opacity = Math.min(1, Math.max(0, value));
     if (this.surface) this.surface.opacity = this.surfaceOptions.opacity;
+  }
+
+  /** Whether the image shows on the back of the portal too, mirrored. */
+  get doubleSided(): boolean {
+    return this.surfaceOptions.doubleSided ?? false;
+  }
+
+  set doubleSided(value: boolean) {
+    this.surfaceOptions.doubleSided = value;
+    if (this.surface) this.surface.doubleSided = value;
   }
 
   get fit(): DisplayFit {

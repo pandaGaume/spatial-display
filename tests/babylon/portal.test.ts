@@ -158,6 +158,15 @@ describe("Portal", () => {
     expect(material.opaque).toBe(true);
     expect(material.needDepthPrePass).toBe(true);
 
+    // The back of the portal shows the image when asked, and still does with another display.
+    expect(portal.doubleSided).toBe(false);
+    expect(material.backFaceCulling).toBe(true);
+    portal.doubleSided = true;
+    expect(material.backFaceCulling).toBe(false);
+    portal.display = new CameraDisplay({ camera });
+    expect((portal.screen.material as DisplayMaterial).backFaceCulling).toBe(false);
+    portal.display = display;
+
     portal.display = null;
     expect(portal.screen.isEnabled()).toBe(false);
     expect(display.texture.renderListPredicate(portal.screen)).toBe(true);

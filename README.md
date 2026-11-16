@@ -27,7 +27,11 @@ npm run example:portal
 npm run example:xray
 ```
 
-The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184. Both take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
+```bash
+npm run example:xray360
+```
+
+The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
 
 ## Use
 
@@ -57,7 +61,7 @@ tvMaterial.emissiveTexture = display.texture;
 core      Display             an image of a given size in pixels: resolution, resize()
 core        PhysicalDisplay   and a rectangle of the world: dimension, setDimension(), pixelPerUnit, dpi
 babylon       Portal          and the meshes that draw it: frame, screen, the display it shows
-babylon     CameraDisplay     the view of a camera, as a render target: a screen, or a window
+babylon     CameraDisplay     the view of a camera, as a render target: a screen, a window, or a lens
 babylon   TextureDisplay      a texture the application already has: a picture, a video
 ```
 
@@ -80,7 +84,9 @@ The image is the one of a screen: it does not depend on who looks at it, so one 
 
 ## Surfaces
 
-`attachDisplay(mesh, display, options)` takes any mesh of Babylon.js that has texture coordinates and a material of its own (not an instance). It gives the mesh an unlit material, and gives it back its former one when the surface is disposed. The image fills the rectangle of the texture space that the mesh uses. `fit` is `"stretch"`, `"contain"` (bands of the `border` color) or `"cover"`, and belongs to the surface: two surfaces can frame the same display differently.
+`attachDisplay(mesh, display, options)` takes any mesh of Babylon.js that has texture coordinates and a material of its own (not an instance). It gives the mesh an unlit material, and gives it back its former one when the surface is disposed. The image fills the rectangle of the texture space that the mesh uses. `fit` is `"stretch"`, `"contain"` (bands of the `border` color) or `"cover"`, and belongs to the surface: two surfaces can frame the same display differently. A display that is a lens is read otherwise, by the place of the surface on screen: see the lens mode below.
+
+The image shows on the front faces of the mesh. With `doubleSided`, an option of the surface and a property that can change at any time (`surface.doubleSided`, `portal.doubleSided`), it shows on the back faces too: on the back of a flat mesh, where it reads mirrored, and on the inside of a hollow one. The faces turned away from the eye are then drawn first, so through a see-through image the far wall of a cylinder shows behind the near one.
 
 ## Transparency
 
@@ -137,7 +143,7 @@ const portal = new Portal("gate", scene, { width: 2, height: 1.2, display, windo
 - The image is drawn after Babylon.js has updated the camera of the viewer, in the same frame: it does not lag behind the viewer.
 - The image always fills the opening: `fit` does not apply.
 
-The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on his side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
+The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on their side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
 
 `display.setWindow(window, anchor)` does the same for a display shown on a surface of the application, `window` being any object with a `root` node and the `width` and `height` of an opening centred on it.
 
@@ -152,13 +158,13 @@ const HIDDEN = 0x20000000;               // a layer the camera of the applicatio
 pipes.layerMask = HIDDEN;
 
 // Never the camera of the scene: it lends the display its layers and its far plane.
-const lens = new FreeCamera("lens", Vector3.Zero(), scene, false);
-lens.layerMask = 0x0fffffff | HIDDEN;
+const scanner = new FreeCamera("scanner", Vector3.Zero(), scene, false);
+scanner.layerMask = 0x0fffffff | HIDDEN;
 
 const wire = new StandardMaterial("wire", scene);
 wire.wireframe = true;
 
-const display = new CameraDisplay({ camera: lens, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 } });
+const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 } });
 const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: true });
 ```
 
@@ -167,6 +173,30 @@ const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, windo
 - A portal does not show in the image of its own display: neither its screen nor its frame.
 - What the scene sets for all its cameras is shared by the two views: fog, environment, image processing. A light can be kept to some layers (`includeOnlyWithLayerMask`).
 - An object seen both around the screen and in it is drawn twice, once for each view.
+
+## Lens mode: an x-ray all around
+
+A window is flat: its camera starts drawing at the plane of its opening. A lens has no such plane, so its surface can have any shape. The display draws what the viewer sees, the way the display draws it, and a surface shows the part of that image it covers on screen:
+
+```ts
+const display = new CameraDisplay({
+  camera: scanner,
+  overrideMaterial: wire,
+  clearColor: { r: 0, g: 0, b: 0, a: 0.85 },
+  include: (mesh) => machine.has(mesh),
+});
+display.setLens({ scene }); // follow the camera of this scene
+
+// An open cylinder around the machine: its wall shows the machine as a wireframe, from every side.
+attachDisplay(ring, display);
+```
+
+- The display draws with a camera of its own, a copy of the one of the viewer: same place, same direction, same projection. The copy is made after Babylon.js has updated the camera of the viewer, in the same frame. The camera given to the display lends its scene and its layer mask, as for a window, and is not moved.
+- The image takes the size of the canvas, so a surface is as sharp as the rest of the screen; `scale` in the lens asks for less, or for more. `resize()` does not hold.
+- A surface reads the image where each of its points lands on screen, not by its texture coordinates: `fit` does not apply. Several surfaces can share a lens, and a portal shows one as any surface does.
+- With `doubleSided`, the inside of the surface shows the image too: the far wall of the cylinder, seen over the near one, and the whole wall for a viewer who stands inside. Both faces read the same image, so where they overlap the glass is twice as dark.
+- Nothing is cut in front of a surface, nor behind it: the image holds whatever the copy draws along the line of sight. Choose it with the layers of the camera given and with `include`.
+- A lens can show another scene: `display.setLens({ scene, root }, anchor)` places the copy in the scene of the display, at the place the viewer has against `root`, taken from `anchor`. The two scenes must have the same handedness.
 
 ## WebGL and WebGPU
 
@@ -179,16 +209,20 @@ The two materials are written in GLSL and in WGSL, and pick their language from 
 | `npm run build` | compile the packages (`tsc -b`) |
 | `npm run typecheck` | packages plus tests and examples |
 | `npm test` | Vitest, with the null engine of Babylon.js |
-| `npm run example:portal` | the example, served by Vite from the sources |
+| `npm run example:portal` | the portal example, served by Vite from the sources |
+| `npm run example:xray` | the x-ray example: a window onto its own scene |
+| `npm run example:xray360` | the x-ray 360 example: a lens on a cylinder |
 
 ## State and limits
 
-The example has been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. Nothing has run in a headset.
+The example has been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. Nothing has run in a headset.
 
 The example serves Babylon.js unbundled (`optimizeDeps.exclude` in its Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
 
 - A window draws one image, for the camera of the scene its opening stands in. In a headset both eyes get that same image: the world behind the opening shifts as the head moves, but has no depth of its own. A portal seen through another display, or by a second camera, shows the image drawn for the first.
 - A window keeps its last image when the viewer goes behind its opening.
+- A lens draws one image too, for the camera of the scene it follows, with the same limits in a headset and for a second camera. It cuts nothing in front of its surfaces.
+- A mesh needs texture coordinates to be a surface, even for a lens, which does not use them.
 - The scale of the anchor of a window is taken as the same along its three axes.
 - No pointer input goes through a surface to the scene behind it yet.
 - A portal does not show in itself.

@@ -15,6 +15,11 @@
 //
 // imageAlpha: x is 1 to use the alpha of the image, y is 1 when the colors of
 // the image are already multiplied by its alpha.
+// projector, projected: when `projected` is 1 the image is not read at the
+// texture coordinates of the surface but where each point of the surface
+// lands once projected by `projector`, from world space to the image. That is
+// how a lens shows, on a surface of any shape, the part of the image of the
+// viewer that the surface covers on their screen.
 // keyRange: x threshold, y smoothness, z is 1 when the color key is on.
 // keyMask: xyz is 1 on the channels the key color is strongest in, w tells by
 // how much they stand above the others; w is 0 for a gray key.
@@ -28,26 +33,37 @@
 export const DISPLAY_VERTEX_GLSL = `precision highp float;
 attribute vec3 position;
 attribute vec2 uv;
+uniform mat4 world;
 uniform mat4 worldViewProjection;
+uniform mat4 projector;
 uniform vec4 uvTransform;
 varying vec2 vUV;
+varying vec4 vProjected;
 void main(void) {
   vUV = uv * uvTransform.xy + uvTransform.zw;
+  vProjected = projector * world * vec4(position, 1.0);
   gl_Position = worldViewProjection * vec4(position, 1.0);
 }`;
 
 export const DISPLAY_FRAGMENT_GLSL = `precision highp float;
 varying vec2 vUV;
+varying vec4 vProjected;
 uniform sampler2D displayTexture;
 uniform float opacity;
+uniform float projected;
 uniform vec2 imageAlpha;
 uniform vec4 border;
 uniform vec3 keyColor;
 uniform vec3 keyRange;
 uniform vec4 keyMask;
 void main(void) {
-  vec2 inside = step(vec2(0.0), vUV) * step(vUV, vec2(1.0));
-  vec4 texel = texture2D(displayTexture, vUV);
+  // Where the image is read: at the texture coordinates of the surface, or where the point lands in the image
+  // once projected, for a display that says so. Behind the eye of that projection there is no image.
+  vec2 landed = vProjected.xy / (abs(vProjected.w) < 0.000001 ? 0.000001 : vProjected.w) * 0.5 + 0.5;
+  vec2 at = mix(vUV, landed, projected);
+  vec2 inside = step(vec2(0.0), at) * step(at, vec2(1.0));
+  float within = inside.x * inside.y * mix(1.0, step(0.0, vProjected.w), projected);
+  vec4 texel = texture2D(displayTexture, at);
   float alpha = mix(1.0, texel.a, imageAlpha.x);
   vec3 color = texel.rgb * mix(1.0, texel.a, imageAlpha.x * (1.0 - imageAlpha.y));
   vec3 straight = color / max(alpha, 0.0001);
@@ -61,25 +77,31 @@ void main(void) {
   vec3 body = clamp((straight - share * keyColor) / max(1.0 - share, 0.001), vec3(0.0), vec3(1.0));
   color = mix(color, body * keep * alpha, keyRange.z);
   alpha *= mix(1.0, keep, keyRange.z);
-  vec4 shown = mix(vec4(border.rgb * border.a, border.a), vec4(color, alpha), inside.x * inside.y);
+  vec4 shown = mix(vec4(border.rgb * border.a, border.a), vec4(color, alpha), within);
   gl_FragColor = shown * opacity;
 }`;
 
 export const DISPLAY_VERTEX_WGSL = `attribute position: vec3f;
 attribute uv: vec2f;
+uniform world: mat4x4f;
 uniform worldViewProjection: mat4x4f;
+uniform projector: mat4x4f;
 uniform uvTransform: vec4f;
 varying vUV: vec2f;
+varying vProjected: vec4f;
 @vertex
 fn main(input: VertexInputs) -> FragmentInputs {
   vertexOutputs.vUV = vertexInputs.uv * uniforms.uvTransform.xy + uniforms.uvTransform.zw;
+  vertexOutputs.vProjected = uniforms.projector * uniforms.world * vec4f(vertexInputs.position, 1.0);
   vertexOutputs.position = uniforms.worldViewProjection * vec4f(vertexInputs.position, 1.0);
 }`;
 
 export const DISPLAY_FRAGMENT_WGSL = `varying vUV: vec2f;
+varying vProjected: vec4f;
 var displayTexture: texture_2d<f32>;
 var displayTextureSampler: sampler;
 uniform opacity: f32;
+uniform projected: f32;
 uniform imageAlpha: vec2f;
 uniform border: vec4f;
 uniform keyColor: vec3f;
@@ -87,8 +109,12 @@ uniform keyRange: vec3f;
 uniform keyMask: vec4f;
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
-  let inside: vec2f = step(vec2f(0.0), input.vUV) * step(input.vUV, vec2f(1.0));
-  let texel: vec4f = textureSample(displayTexture, displayTextureSampler, input.vUV);
+  let depth: f32 = select(input.vProjected.w, 0.000001, abs(input.vProjected.w) < 0.000001);
+  let landed: vec2f = input.vProjected.xy / depth * 0.5 + vec2f(0.5);
+  let at: vec2f = mix(input.vUV, landed, uniforms.projected);
+  let inside: vec2f = step(vec2f(0.0), at) * step(at, vec2f(1.0));
+  let within: f32 = inside.x * inside.y * mix(1.0, step(0.0, input.vProjected.w), uniforms.projected);
+  let texel: vec4f = textureSample(displayTexture, displayTextureSampler, at);
   var alpha: f32 = mix(1.0, texel.a, uniforms.imageAlpha.x);
   var color: vec3f = texel.rgb * mix(1.0, texel.a, uniforms.imageAlpha.x * (1.0 - uniforms.imageAlpha.y));
   let straight: vec3f = color / max(alpha, 0.0001);
@@ -102,7 +128,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
   let body: vec3f = clamp((straight - share * uniforms.keyColor) / max(1.0 - share, 0.001), vec3f(0.0), vec3f(1.0));
   color = mix(color, body * keep * alpha, uniforms.keyRange.z);
   alpha = alpha * mix(1.0, keep, uniforms.keyRange.z);
-  let shown: vec4f = mix(vec4f(uniforms.border.rgb * uniforms.border.a, uniforms.border.a), vec4f(color, alpha), inside.x * inside.y);
+  let shown: vec4f = mix(vec4f(uniforms.border.rgb * uniforms.border.a, uniforms.border.a), vec4f(color, alpha), within);
   fragmentOutputs.color = shown * uniforms.opacity;
 }`;
 

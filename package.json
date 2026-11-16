@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "example:portal": "vite examples/portal",
     "example:xray": "vite examples/xray",
+    "example:xray360": "vite examples/xray360",
     "clean": "tsc -b --clean"
   },
   "devDependencies": {

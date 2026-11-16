@@ -20,9 +20,17 @@ export interface IDisplaySurfaceOptions {
    * mesh that is flat along y).
    */
   aspect?: number;
-  /** Shows the image on both faces of the mesh. Default false. */
+  /**
+   * Shows the image on both faces of the mesh: also on the back of a flat
+   * mesh, where it reads mirrored, and on the inside of a hollow one, as the
+   * far wall of a cylinder. Default false.
+   */
   doubleSided?: boolean;
-  /** Color of the surface where the image does not reach ("contain"). Default opaque black. */
+  /**
+   * Color of the surface where the image does not reach ("contain"). Default
+   * opaque black, and nothing for a display that is a lens: its image reaches
+   * the whole surface wherever its viewer sees it.
+   */
   border?: Readonly<IColor4Like>;
   /**
    * Lets the transparent pixels of the image through. Default: what the
@@ -46,7 +54,9 @@ export interface IDisplaySurfaceOptions {
  *
  * The image fills the rectangle of the texture space that the mesh uses,
  * whatever that rectangle is: a mesh modelled with its screen mapped on a
- * corner of an atlas shows the whole image on that screen.
+ * corner of an atlas shows the whole image on that screen. A display that is a
+ * lens is read otherwise: the surface shows the part of its image that it
+ * covers on the screen of the viewer, and `fit` does not apply.
  *
  * What stands behind the surface shows through it by
  * `1 - opacity * alpha of the pixel`, the alpha of a pixel being 1 unless the
@@ -61,6 +71,8 @@ export class DisplaySurface {
   private readonly transform: IUvTransform = { uScale: 1, vScale: 1, uOffset: 0, vOffset: 0 };
   /** undefined: follows what the texture of the display says. */
   private imageAlpha: boolean | undefined;
+  /** null: black, or nothing for a lens. */
+  private readonly borderGiven: Readonly<IColor4Like> | null;
   private _display: ITextureDisplay;
   private _fit: DisplayFit;
   private _aspect: number;
@@ -80,11 +92,11 @@ export class DisplaySurface {
     this.imageAlpha = options.useImageAlpha;
     this.former = mesh.material;
     this.material = new DisplayMaterial(`${mesh.name}.display`, mesh.getScene());
-    this.material.backFaceCulling = !(options.doubleSided ?? false);
+    this.doubleSided = options.doubleSided ?? false;
     this.material.opacity = options.opacity ?? 1;
     this.material.chromaKey = options.chromaKey ?? null;
     this.material.alwaysBlended = options.alwaysBlended ?? false;
-    if (options.border) this.material.border = options.border;
+    this.borderGiven = options.border ?? null;
     mesh.material = this.material;
     this._display = display;
     this.bind(display);
@@ -101,6 +113,18 @@ export class DisplaySurface {
     this.unbind();
     this._display = value;
     this.bind(value);
+  }
+
+  /** See `IDisplaySurfaceOptions.doubleSided`. */
+  get doubleSided(): boolean {
+    return !this.material.backFaceCulling;
+  }
+
+  set doubleSided(value: boolean) {
+    this.material.backFaceCulling = !value;
+    // The faces turned away from the eye are drawn first, then those turned toward it:
+    // through a see-through image, the far wall of a hollow mesh shows behind the near one.
+    this.material.separateCullingPass = value;
   }
 
   get opacity(): number {
@@ -164,7 +188,7 @@ export class DisplaySurface {
       if (change.kind === "texture") {
         this.material.image = display.texture;
         this.updateAlpha();
-      } else if (change.kind === "resolution") this.update();
+      } else if (change.kind === "resolution" || change.kind === "mapping") this.update();
       else if (change.kind === "alpha") this.updateAlpha();
       // Nothing is left to show: the mesh gets its own material back.
       else if (change.kind === "disposed") this.dispose();
@@ -187,6 +211,11 @@ export class DisplaySurface {
   }
 
   private update(): void {
+    // A lens tells how its image is read: where each point of the surface lands on the screen of the viewer.
+    const projector = this._display.imageTransform ?? null;
+    this.material.projector = projector;
+    this.material.border = this.borderGiven ?? (projector ? NO_BORDER : BLACK_BORDER);
+    if (projector) return;
     const { width, height } = this._display.resolution;
     fitUv(height > 0 ? width / height : 0, this._aspect, this._fit, this.transform);
     this.material.setUvTransform(applyUvBounds(this.transform, this.bounds, this.transform));
@@ -196,6 +225,9 @@ export class DisplaySurface {
 /** Shows `display` on `mesh`. Dispose of the surface returned to give the mesh its material back. */
 export const attachDisplay = (mesh: AbstractMesh, display: ITextureDisplay, options?: Readonly<IDisplaySurfaceOptions>): DisplaySurface =>
   new DisplaySurface(mesh, display, options);
+
+const BLACK_BORDER: Readonly<IColor4Like> = { r: 0, g: 0, b: 0, a: 1 };
+const NO_BORDER: Readonly<IColor4Like> = { r: 0, g: 0, b: 0, a: 0 };
 
 function checkSameEngine(mesh: AbstractMesh, display: ITextureDisplay): void {
   const source = display.texture.getScene();

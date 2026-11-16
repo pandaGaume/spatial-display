@@ -25,14 +25,14 @@ const makeScene = () => {
   hidden.position.z = 6;
   hidden.layerMask = HIDDEN_LAYER;
   // Never the camera of the scene: it lends a display its layers.
-  const lens = new FreeCamera("lens", Vector3.Zero(), scene, false);
-  lens.layerMask = 0x0fffffff | HIDDEN_LAYER;
+  const scanner = new FreeCamera("scanner", Vector3.Zero(), scene, false);
+  scanner.layerMask = 0x0fffffff | HIDDEN_LAYER;
   const frame = (): void => {
     engine.beginFrame();
     scene.render();
     engine.endFrame();
   };
-  return { engine, scene, viewer, lens, seen, hidden, frame };
+  return { engine, scene, viewer, scanner, seen, hidden, frame };
 };
 
 /** The material a mesh is drawn with in the image of a display, when it is not its own. */
@@ -40,11 +40,11 @@ const inImage = (display: CameraDisplay, mesh: AbstractMesh) => mesh.getMaterial
 
 describe("material override", () => {
   it("draws the meshes of an image with another material, and leaves them their own", () => {
-    const { scene, lens, seen, hidden, frame } = makeScene();
+    const { scene, scanner, seen, hidden, frame } = makeScene();
     const wire = new StandardMaterial("wire", scene);
     wire.wireframe = true;
     const paint = seen.material;
-    const display = new CameraDisplay({ camera: lens, overrideMaterial: wire });
+    const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire });
     frame();
     expect(inImage(display, seen)).toBe(wire);
     expect(inImage(display, hidden)).toBe(wire);
@@ -69,9 +69,9 @@ describe("material override", () => {
 
 describe("a window onto its own scene", () => {
   it("looks at what stands behind the portal, from the eye of the viewer", () => {
-    const { scene, viewer, lens, seen, hidden, frame } = makeScene();
+    const { scene, viewer, scanner, seen, hidden, frame } = makeScene();
     const wire = new StandardMaterial("wire", scene);
-    const display = new CameraDisplay({ camera: lens, overrideMaterial: wire });
+    const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire });
     const portal = new Portal("xray", scene, { width: 2, height: 1, display, window: true });
     portal.root.position.set(0, 0, 1);
 
