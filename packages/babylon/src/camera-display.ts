@@ -118,6 +118,7 @@ const WINDOW_DEFAULT_FAR = 10000;
 
 const TMP_MATRIX = new Matrix();
 const TMP_WORLD = new Matrix();
+const TMP_VIEW = new Matrix();
 const TMP_EYE = new Vector3();
 const TMP_SCALE = new Vector3();
 const UP = new Vector3(0, 1, 0);
@@ -516,7 +517,13 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     camera.maxZ = viewer.maxZ;
     camera.layerMask = this._camera.layerMask;
     // A point of a surface is read in the image where the viewer sees it: their own transform, whatever the anchor.
-    viewer.getViewMatrix().multiplyToRef(viewer.getProjectionMatrix(), state.transform);
+    if (lens.scene.floatingOriginMode) {
+      // A scene with a floating origin counts positions from the eye of its camera, and Babylon.js hands the shader
+      // of a surface a world matrix counted from there. The transform reads the points of the surface the same way:
+      // it turns as the viewer does, and no longer moves them.
+      TMP_VIEW.copyFrom(viewer.getViewMatrix()).setTranslationFromFloats(0, 0, 0);
+      TMP_VIEW.multiplyToRef(viewer.getProjectionMatrix(), state.transform);
+    } else viewer.getViewMatrix().multiplyToRef(viewer.getProjectionMatrix(), state.transform);
 
     if (this.windowDue && this.driven) {
       this.windowDue = false;

@@ -242,4 +242,34 @@ describe("lens mode", () => {
     expect(display.lens).toBeNull();
     expect(display.texture.activeCamera).toBe(scanner);
   });
+
+  it("reads its image with positions counted from the eye, in a scene with a floating origin", () => {
+    const engine = makeEngine();
+    const scene = new Scene(engine, { useFloatingOrigin: true });
+    expect(scene.floatingOriginMode).toBe(true);
+    // Far from the origin of the scene, as on the ground of a planet.
+    const place = new Vector3(4200, 3100, -3800);
+    const viewer = new FreeCamera("viewer", place.add(new Vector3(1.2, 2, -5)), scene);
+    viewer.setTarget(place.add(new Vector3(0, 1, 0)));
+    const scanner = new FreeCamera("scanner", Vector3.Zero(), scene, false);
+    const display = new CameraDisplay({ camera: scanner });
+    display.setLens({ scene });
+    frame(engine, scene);
+
+    // The lens still stands where the viewer does.
+    expect(Vector3.Distance((display.lensCamera as Camera).position, viewer.globalPosition)).toBeLessThan(1e-3);
+    // Babylon.js hands the shader of a surface its points counted from the eye of the viewer: read that way, a point
+    // lands in the image where the viewer sees it.
+    const transform = display.imageTransform as Matrix;
+    for (const offset of [new Vector3(0.4, 1.3, 0.2), new Vector3(-2, 0.1, 3), new Vector3(1.5, 2.4, -1)]) {
+      const point = place.add(offset);
+      const seen = Vector3.TransformCoordinates(point, transformOf(viewer));
+      const read = Vector3.TransformCoordinates(point.subtract(viewer.globalPosition), transform);
+      expect(read.x).toBeCloseTo(seen.x, 2);
+      expect(read.y).toBeCloseTo(seen.y, 2);
+    }
+    // The transform no longer moves what it reads: only the turn of the viewer and their projection are left.
+    expect(transform.m[12]).toBeCloseTo(0, 6);
+    expect(transform.m[13]).toBeCloseTo(0, 6);
+  });
 });

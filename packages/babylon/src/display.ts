@@ -90,7 +90,8 @@ export interface ITextureDisplay extends IDisplay {
    * How a surface reads the image. null or left out: by its own texture
    * coordinates. A matrix: by where each of its points lands once projected
    * with it, from world space to the image; it is rewritten in place at every
-   * frame.
+   * frame. World space is the one the shader of the surface gets: in a scene
+   * with a floating origin, positions counted from the eye of its camera.
    */
   readonly imageTransform?: Matrix | null;
   /**
