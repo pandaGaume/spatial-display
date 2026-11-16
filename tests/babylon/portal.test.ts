@@ -149,9 +149,10 @@ describe("Portal", () => {
     expect(material.opaque).toBe(false);
     expect(material.needDepthPrePass).toBe(false);
     expect(material.alphaMode).toBe(Constants.ALPHA_PREMULTIPLIED_PORTERDUFF);
-    // The screen of a portal stays out of the image of its own display.
+    // A portal stays out of the image of its own display: its screen, and its frame too.
     expect(display.texture.renderListPredicate(portal.screen)).toBe(false);
-    expect(display.texture.renderListPredicate(portal.frame)).toBe(true);
+    expect(display.texture.renderListPredicate(portal.frame)).toBe(false);
+    expect(display.texture.renderListPredicate(portal.glow)).toBe(false);
 
     portal.opacity = 1;
     expect(material.opaque).toBe(true);

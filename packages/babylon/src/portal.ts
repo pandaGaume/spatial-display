@@ -50,7 +50,10 @@ export interface IPortalWindowOptions {
    * scene, whose frame is the one of the opening. The scene lies behind it:
    * toward +z in a left-handed scene, toward -z in a right-handed one. Its
    * scale sizes the world against the opening. Default: the origin of the
-   * scene, unturned.
+   * scene, unturned; or the portal itself when its display shows the very
+   * scene the portal stands in. The opening then gives onto what stands
+   * behind it, drawn as its display draws it: with other layers, or another
+   * material.
    */
   anchor?: TransformNode;
   /** Light on the far side of the opening; false for none. */
@@ -323,6 +326,8 @@ export class Portal extends PhysicalDisplay {
     if (previous && this.displayObserver) previous.onChangedObservable.remove(this.displayObserver);
     this.displayObserver = null;
     if (previous && this.windowOptions) previous.setWindow?.(null);
+    previous?.removeSurface?.(this.glowMesh);
+    previous?.removeSurface?.(this.tubeMesh);
     this.disposeWorldGlow();
     this._display = value;
     if (!value) {
@@ -337,8 +342,11 @@ export class Portal extends PhysicalDisplay {
         // The display shows another scene: the light behind the opening moves there.
         else if (change.kind === "texture") this.buildWorldGlow(value);
       });
+      // The frame belongs to the portal as its screen does: a display does not show the portal it is shown in.
+      value.addSurface?.(this.glowMesh);
+      value.addSurface?.(this.tubeMesh);
       if (this.windowOptions) {
-        value.setWindow?.(this, this.windowOptions.anchor ?? null);
+        value.setWindow?.(this, this.anchorIn(value));
         this.buildWorldGlow(value);
       }
       // A portal that keeps a density of pixels gives its resolution to a display that can take it.
@@ -461,6 +469,18 @@ export class Portal extends PhysicalDisplay {
   }
 
   /**
+   * Where the opening stands in the scene of a display: the anchor the portal
+   * was given, when it is of that scene; the portal itself, when the display
+   * shows the scene the portal stands in; else the origin of that scene.
+   */
+  private anchorIn(display: ITextureDisplay): TransformNode | null {
+    const scene = display.texture.getScene();
+    const given = this.windowOptions?.anchor;
+    if (given && given.getScene() === scene) return given;
+    return scene === this.root.getScene() ? this.root : null;
+  }
+
+  /**
    * Sets the walls of light behind the opening, in the scene the display
    * shows. Only the camera of the window draws them: they are on its layer.
    */
@@ -469,7 +489,7 @@ export class Portal extends PhysicalDisplay {
     const options = this.windowOptions;
     const scene = display.texture.getScene();
     if (!options || options.glow === false || !display.setWindow || !scene) return;
-    const anchor = options.anchor && options.anchor.getScene() === scene ? options.anchor : null;
+    const anchor = this.anchorIn(display);
     // Behind the opening: toward +z in a left-handed scene, toward -z in a right-handed one.
     const into = scene.useRightHandedSystem ? -1 : 1;
     const geometry = createRectTunnel({ width: this.width, height: this.height, depth: this.worldGlowDepth * into });

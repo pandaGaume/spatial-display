@@ -23,7 +23,11 @@ npm test
 npm run example:portal
 ```
 
-The example opens on http://localhost:5183. Add `?webgpu` for the WebGPU engine, `?rh` for right-handed scenes and `?window` for the window mode.
+```bash
+npm run example:xray
+```
+
+The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184. Both take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
 
 ## Use
 
@@ -53,7 +57,7 @@ tvMaterial.emissiveTexture = display.texture;
 core      Display             an image of a given size in pixels: resolution, resize()
 core        PhysicalDisplay   and a rectangle of the world: dimension, setDimension(), pixelPerUnit, dpi
 babylon       Portal          and the meshes that draw it: frame, screen, the display it shows
-babylon     CameraDisplay     the view of a camera, as a render target
+babylon     CameraDisplay     the view of a camera, as a render target: a screen, or a window
 babylon   TextureDisplay      a texture the application already has: a picture, a video
 ```
 
@@ -136,6 +140,33 @@ const portal = new Portal("gate", scene, { width: 2, height: 1.2, display, windo
 The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on his side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
 
 `display.setWindow(window, anchor)` does the same for a display shown on a surface of the application, `window` being any object with a `root` node and the `width` and `height` of an opening centred on it.
+
+## One scene: layers and an x-ray
+
+A mesh of Babylon.js belongs to one scene, and so does a camera. To show in a window an object that is costly to draw, without a copy of it in a second scene, keep one scene and tell its cameras apart by layers: a mesh is drawn by a camera when their `layerMask` share a bit.
+
+A display can show the scene its portal stands in. As a window, the portal then needs no anchor: its opening gives onto what stands behind it, seen from the eye of the viewer, and drawn as its display draws it.
+
+```ts
+const HIDDEN = 0x20000000;               // a layer the camera of the application does not draw
+pipes.layerMask = HIDDEN;
+
+// Never the camera of the scene: it lends the display its layers and its far plane.
+const lens = new FreeCamera("lens", Vector3.Zero(), scene, false);
+lens.layerMask = 0x0fffffff | HIDDEN;
+
+const wire = new StandardMaterial("wire", scene);
+wire.wireframe = true;
+
+const display = new CameraDisplay({ camera: lens, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 } });
+const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: true });
+```
+
+- `overrideMaterial` draws the meshes with another material in the image of the display, and with their own everywhere else: one material for all, or a function that picks one for each mesh. Nothing is copied: a mesh is drawn solid by the camera of the application and as a wireframe by the screen, from the same vertices.
+- The camera of the window draws the layers of the camera the display was given, so the screen can see what the application does not show, or less than it shows.
+- A portal does not show in the image of its own display: neither its screen nor its frame.
+- What the scene sets for all its cameras is shared by the two views: fog, environment, image processing. A light can be kept to some layers (`includeOnlyWithLayerMask`).
+- An object seen both around the screen and in it is drawn twice, once for each view.
 
 ## WebGL and WebGPU
 

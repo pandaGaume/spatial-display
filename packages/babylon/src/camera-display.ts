@@ -1,5 +1,6 @@
 import type { Camera } from "@babylonjs/core/Cameras/camera.js";
 import { TargetCamera } from "@babylonjs/core/Cameras/targetCamera.js";
+import type { Material } from "@babylonjs/core/Materials/material.js";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture.js";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
 import { Color4 } from "@babylonjs/core/Maths/math.color.js";
@@ -10,6 +11,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Observable, type Observer } from "@babylonjs/core/Misc/observable.js";
 import type { Scene } from "@babylonjs/core/scene.js";
+import type { Nullable } from "@babylonjs/core/types.js";
 import { Display, RefreshClock, windowFrustum, windowProjection, type DisplayRefresh, type ISize2 } from "@spacexr/spatial-display-core";
 import { WINDOW_LAYER_MASK, type IDisplayChange, type IDisplayWindow, type ITextureDisplay } from "./display.js";
 import { SourceHub, type ISourceHubClient } from "./source-hub.js";
@@ -23,6 +25,13 @@ import { SourceHub, type ISourceHubClient } from "./source-hub.js";
  *   through displays. Nothing of that scene reaches the canvas.
  */
 export type DisplayDrive = "app" | "display";
+
+/**
+ * A material that the meshes of an image are drawn with instead of their own:
+ * one for all of them, or the one a function picks for each, null leaving a
+ * mesh its own.
+ */
+export type DisplayMaterialOverride = Material | ((mesh: AbstractMesh) => Nullable<Material>);
 
 export interface ICameraDisplayOptions {
   /**
@@ -57,6 +66,13 @@ export interface ICameraDisplayOptions {
   clearColor?: Readonly<IColor4Like>;
   /** Applies the post-processes of the camera to the image. Default false. */
   postProcesses?: boolean;
+  /**
+   * Draws the meshes with another material in the image, and with their own
+   * everywhere else: a wireframe for an x-ray, a flat color for a mask. The
+   * meshes are not copied. The material belongs to the scene of the camera.
+   * Default: none.
+   */
+  overrideMaterial?: DisplayMaterialOverride;
   /** Name of the texture. Default "display". */
   name?: string;
 }
@@ -132,6 +148,9 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   private _texture: RenderTargetTexture;
   private _drive: DisplayDrive;
   private _clearColor: Readonly<IColor4Like> | null;
+  private _overrideMaterial: DisplayMaterialOverride | null;
+  /** True while meshes carry a material of this display: they are given their own back once the override is gone. */
+  private overridden = false;
   private hub: SourceHub;
   private windowState: IWindowState | null = null;
   /** In window mode the image is drawn once the viewer is known for the frame: whether it is due waits until then. */
@@ -147,6 +166,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     this.pauseWhenHidden = options.pauseWhenHidden ?? true;
     this._drive = options.drive ?? "app";
     this._clearColor = options.clearColor ? { ...options.clearColor } : null;
+    this._overrideMaterial = options.overrideMaterial ?? null;
     this._camera = options.camera;
     this._texture = this.createTexture(options.camera);
     this.hub = this.attachSource(options.camera.getScene());
@@ -186,6 +206,16 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     this.applyClearColor(this._texture);
     this.clock.invalidate();
     if (this._texture.hasAlpha !== seeThrough) this.onChangedObservable.notifyObservers({ kind: "alpha" });
+  }
+
+  /** See `ICameraDisplayOptions.overrideMaterial`; null for none. */
+  get overrideMaterial(): DisplayMaterialOverride | null {
+    return this._overrideMaterial;
+  }
+
+  set overrideMaterial(value: DisplayMaterialOverride | null) {
+    this._overrideMaterial = value;
+    this.clock.invalidate();
   }
 
   get refresh(): DisplayRefresh {
@@ -442,8 +472,23 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     texture.renderListPredicate = (mesh) => !this.surfaces.has(mesh) && (include ? include(mesh) : true);
     this.applyClearColor(texture);
     if (options.postProcesses) texture.useCameraPostProcesses = true;
+    // Notified once the list of what the image shows is made, and before any of it is drawn.
+    texture.onBeforeBindObservable.add(() => this.applyOverride(texture));
     scene.customRenderTargets.push(texture);
     return texture;
+  }
+
+  /** Gives the meshes of the image the material they are drawn with in it, which Babylon.js keeps apart from their own. */
+  private applyOverride(texture: RenderTargetTexture): void {
+    const override = this._overrideMaterial;
+    const meshes = texture.renderList;
+    if (!meshes || (!override && !this.overridden)) return;
+    for (const mesh of meshes) {
+      // What a portal sets behind its opening is light, not a body: it keeps its own look.
+      const material = override && mesh.layerMask !== WINDOW_LAYER_MASK ? (typeof override === "function" ? override(mesh) : override) : null;
+      texture.setMaterialForRendering(mesh, material ?? undefined);
+    }
+    this.overridden = override !== null;
   }
 
   private applyClearColor(texture: RenderTargetTexture): void {
