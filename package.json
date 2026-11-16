@@ -1,0 +1,31 @@
+{
+  "name": "spatial-display",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Displays for 3D scenes: the view of any camera of any scene shown on any mesh surface, and a resizable portal with a neon frame.",
+  "license": "Apache-2.0",
+  "author": "Guillaume Pelletier (SpaceXR)",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/babylon"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.tests.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "example:portal": "vite examples/portal",
+    "clean": "tsc -b --clean"
+  },
+  "devDependencies": {
+    "@babylonjs/core": "9.33.1",
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

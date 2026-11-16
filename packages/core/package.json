@@ -1,0 +1,25 @@
+{
+  "name": "@spacexr/spatial-display-core",
+  "version": "0.1.0",
+  "description": "Renderer-agnostic contract and math for spatial displays: display interfaces, frame geometry, image fitting, refresh scheduling.",
+  "license": "Apache-2.0",
+  "author": "Guillaume Pelletier (SpaceXR)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}

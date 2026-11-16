@@ -1,0 +1,32 @@
+{
+  "name": "@spacexr/spatial-display-babylon",
+  "version": "0.1.0",
+  "description": "Babylon.js displays: the view of any camera of any scene as a texture, on any mesh surface, and a resizable portal with a neon frame.",
+  "license": "Apache-2.0",
+  "author": "Guillaume Pelletier (SpaceXR)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo"
+  ],
+  "sideEffects": false,
+  "peerDependencies": {
+    "@babylonjs/core": "^9.0.0",
+    "@spacexr/spatial-display-core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@babylonjs/core": "9.33.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
