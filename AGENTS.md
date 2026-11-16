@@ -1,0 +1,215 @@
+# AGENTS.md
+
+Guidance for coding agents. Part 1 is for an agent that integrates a portal, or any display, into an application. Part 2 is for an agent that changes this repository.
+
+`spatial-display` shows an image on a mesh of a Babylon.js scene: the view of a camera of any scene, a picture, a video. A `Portal` is the ready-made surface: a rectangular opening in a frame of light. [README.md](README.md) explains how each part works; this file says what to reach for, and what not to assume.
+
+## Part 1: integrating a portal in an application
+
+### Packages
+
+| Package | Use it for |
+|---|---|
+| `@spacexr/spatial-display-babylon` | Everything an application needs: `CameraDisplay`, `TextureDisplay`, `Portal`, `attachDisplay`. Peer dependency on `@babylonjs/core` 9. |
+| `@spacexr/spatial-display-core` | Types and math with no rendering library. An application imports from it only for types (`DisplayFit`, `DisplayRefresh`, `ISize2`) or to build its own adapter. |
+
+Both are at version 0.1.0. Check that they are on npm before adding them to a manifest; if they are not, build this repository (`npm run build`) and link its two packages.
+
+There is nothing to call in the render loop. A display hooks itself to the engine and to the scenes it needs.
+
+### Pick by intent
+
+| The application wants | Use |
+|---|---|
+| A framed screen that shows what a camera sees | `CameraDisplay` + `Portal` |
+| That camera to belong to a scene the application never renders | the same, with `drive: "display"` |
+| An opening that gives onto another scene, with parallax as the viewer moves | `Portal` with `window: { anchor }` |
+| An opening onto the same scene, drawn differently (x-ray, wireframe, other layers) | one scene, `overrideMaterial` and `layerMask`, `Portal` with `window: true` |
+| The image on a mesh the application already has (a monitor of a glTF model) | `attachDisplay(mesh, display)` |
+| The image on a material of its own | `material.emissiveTexture = display.texture` |
+| A picture or a video instead of a camera | `TextureDisplay` |
+| To avoid a second copy of a costly mesh | one scene and layer masks, never two scenes |
+
+### Recipes
+
+A screen that shows another scene. `worldCamera` belongs to a scene of the same engine, which the application does not render:
+
+```ts
+import { CameraDisplay, Portal } from "@spacexr/spatial-display-babylon";
+
+const display = new CameraDisplay({ camera: worldCamera, drive: "display", resolution: { width: 1280, height: 720 } });
+const portal = new Portal("gate", scene, { width: 1.6, height: 0.9, display });
+portal.root.position.set(0, 1.5, 2);
+```
+
+A window onto another scene. The anchor is where the opening stands in that scene; the scene lies behind it:
+
+```ts
+const anchor = new TransformNode("anchor", world);
+anchor.position.set(0, 1.5, -6);
+const display = new CameraDisplay({ camera: worldCamera, drive: "display" });
+const portal = new Portal("gate", scene, { width: 2, height: 1.2, display, window: { anchor } });
+```
+
+An x-ray screen, in one scene. No mesh is copied; the screen also sees a layer the application does not draw:
+
+```ts
+const HIDDEN = 0x20000000;
+pipes.layerMask = HIDDEN;
+
+// Never the camera of the scene: it lends the display its layers and its far plane.
+const lens = new FreeCamera("lens", Vector3.Zero(), scene, false);
+lens.layerMask = 0x0fffffff | HIDDEN;
+
+const wire = new StandardMaterial("wire", scene);
+wire.wireframe = true;
+wire.disableLighting = true;
+wire.emissiveColor = new Color3(0.25, 0.95, 1);
+
+const display = new CameraDisplay({ camera: lens, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 }, samples: 4 });
+const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: true });
+```
+
+Any mesh as a screen, and back:
+
+```ts
+const surface = attachDisplay(scene.getMeshByName("screen")!, display, { fit: "cover" });
+surface.dispose(); // the mesh gets its former material back
+```
+
+A picture with transparent parts:
+
+```ts
+const picture = new Texture("logo.png", scene);
+picture.hasAlpha = true;
+portal.display = new TextureDisplay(picture, { ownsTexture: true });
+```
+
+Transparency and look, at any time:
+
+```ts
+portal.opacity = 0.6;                                // the whole image
+display.clearColor = { r: 0, g: 0, b: 0, a: 0 };     // a camera display with a see-through background
+portal.chromaKey = { color: { r: 0, g: 1, b: 0 } };  // let a color through, as a green screen
+
+portal.frameSection = 0.02;                          // width of the line of the frame, world units
+portal.lineColor = { r: 1, g: 1, b: 1 };
+portal.glowColor = { r: 1, g: 0.4, b: 0.1 };
+portal.glowSize = 0.25;                              // world units, 0 for the bare line
+portal.glowIntensity = 2;
+portal.neon.flow.amplitude = 0.4;                    // waves of light along the frame
+```
+
+### Facts to rely on
+
+- **Two sizes.** `portal.setDimension(width, height)` sizes the opening, in world units. `portal.resize(width, height)` sizes the image, in pixels, and resizes the display. `portal.width` and `portal.height` are in world units. Do not scale `portal.root`: it would thicken the frame.
+- **Placement.** Position, rotate and parent `portal.root`. Facing the front of a portal, its local x reads to the right and y upward. The front looks toward -z in a left-handed scene and toward +z in a right-handed one. The image shows on the front only, unless `doubleSided`.
+- **Ownership.** A portal does not own its display, and a display may feed several surfaces. Dispose of each: `portal.dispose()`, `surface.dispose()`, `display.dispose()`. Disposing of a display empties the portals and surfaces that showed it. A display disposes of itself when its source scene is disposed.
+- **One engine.** The scene of the camera and the scene of the surface must share an engine. `attachDisplay` and the `camera` setter throw otherwise.
+- **Who renders the source scene.** `drive: "app"` (default) expects the application to render it. `drive: "display"` renders it off the canvas, once per frame. Use `"display"` for a scene that exists only to be looked at through displays; using it for a scene the application also renders draws that scene twice, and logs a warning.
+- **A portal is not in its own image.** Its screen, its frame and its glow are kept out of what its display draws.
+- **Blending.** The screen of a portal is always drawn with the blended meshes, after the glow of its frame, so the glow never covers the image. When opaque, it writes its depth first.
+- **Windows.** `display.windowCamera` is the camera the library places; do not move it. The camera given to the display is not moved either: it lends its scene, its `maxZ` and its `layerMask`. The image always fills the opening, so `fit` is ignored.
+- **Layers.** `WINDOW_LAYER_MASK` (0x10000000) is taken: it holds the light a window sets behind its opening. Use another bit for layers of the application, above the 28 bits (0x0fffffff) Babylon.js gives cameras and meshes by default.
+- **Cost.** Each camera display is one more draw of its source scene. Lower it with `refresh: { hz: 10 }` or `"manual"` plus `display.invalidate()`, with a smaller `resolution`, and leave `pauseWhenHidden` on: a display stops drawing while none of its surfaces is on screen.
+- **Engines.** WebGL2 and WebGPU. The two materials of the library carry their shaders in GLSL and in WGSL.
+
+### What the library adds to a scene
+
+Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; do not remove them, and skip them when iterating over a scene.
+
+| Object | Scene | When |
+|---|---|---|
+| Meshes `<name>.glow`, `<name>.screen`, `<name>.frame` under the node `<name>` | of the portal | always |
+| Materials `<name>.neon`, `<name>.line`, `<name>.screen.display` | of the portal | always, the last one while a display is shown |
+| Render target named after the display (`name` option, default `display`) in `customRenderTargets` | of the camera | always |
+| Camera `spatial-display.driver`, which draws nothing | of the camera | `drive: "display"` |
+| Camera `<display name>.window` | of the camera | window mode |
+| Mesh and material `<name>.worldGlow`, on `WINDOW_LAYER_MASK` | of the camera | window mode, unless `window: { glow: false }` |
+
+### When something looks wrong
+
+| Symptom | Cause and fix |
+|---|---|
+| The image is empty or frozen | Nothing renders the source scene. Render it in the loop, or set `drive: "display"`. |
+| The image lags one frame | The source scene is rendered after the scene of the surface. Render it first, or use `drive: "display"`. |
+| A see-through image has dark or bright fringes | The material was told the wrong alpha convention. A display declares it with `premultipliedAlpha`: true for render targets, false for pictures and videos. |
+| Transparent parts of a picture show opaque | Set `texture.hasAlpha = true`, or `useImageAlpha: true` on the portal or the surface. |
+| A window shows nothing new when the viewer goes behind the portal | By design: it keeps its last image. |
+| `attachDisplay` throws | The mesh has no texture coordinates, is an instance (use its source mesh), or belongs to another engine. |
+| The glow does not show over the image | By design. It shows around the opening, and through a see-through image. |
+| A transparent object behind a portal is drawn over it | Blended meshes are sorted by distance. Move the object, or give it a lower `alphaIndex`. |
+| Standard materials fail to compile, with HTML in the shader source | A Vite dev server bundled Babylon.js in several passes. Add `optimizeDeps: { exclude: ["@babylonjs/core"] }`, as `examples/vite.base.ts` does. |
+| Wireframe lines of an x-ray are faint | They are one pixel wide in the image of the display. Lower its `resolution` toward the size of the screen on the canvas. |
+
+### Not available
+
+Do not promise these to a user, and do not look for them in the API:
+
+- Pointer input through a surface to the scene behind it.
+- A separate image for each eye in window mode. In a headset both eyes get the image drawn for the camera of the scene.
+- A portal that shows in itself.
+- Fog, clip planes and instances in the materials of the screen and of the frame. For those, give `display.texture` to a material of the application.
+- A source scene that uses `scene.activeCameras` with `drive: "display"`.
+- Glow and highlight layers of the source scene in the image. The post-processes of the camera do show, with `postProcesses: true`.
+
+Nothing has been run in a headset.
+
+## Part 2: working in this repository
+
+### Commands
+
+```bash
+npm install
+npm run build          # tsc -b, both packages
+npm run typecheck      # packages, tests and examples
+npm test               # Vitest
+npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
+npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
+```
+
+Run `npm run typecheck` and `npm test` before calling a change done.
+
+### Layout
+
+```
+packages/core/src       no dependency, no rendering library, no DOM
+  types.ts              IDisplay, IPhysicalDisplay, ISize2
+  display/              Display, PhysicalDisplay: the base classes
+  geometry/             frame, halo of the frame, walls behind a window, image fitting
+  projection/           off-axis projection of a window
+  temporal/             refresh clock
+packages/babylon/src    the Babylon.js adapter
+  camera-display.ts     CameraDisplay: screen and window
+  texture-display.ts    TextureDisplay
+  surface.ts            DisplaySurface, attachDisplay
+  portal.ts             Portal
+  source-hub.ts         per-scene beat of the frame, rendering of driven scenes
+  materials/            DisplayMaterial, NeonMaterial, their shaders
+tests/core, tests/babylon
+examples/portal, examples/xray, examples/vite.base.ts
+```
+
+### Conventions
+
+- Every interface is named `IXxx`, the options of a class included (`IPortalOptions`). Type aliases and classes take plain names.
+- Public APIs take and return the most general Babylon.js type: `AbstractMesh`, not `Mesh`. Keep `Mesh` for private fields that build geometry.
+- What does not need a rendering library goes in `packages/core`, and the Babylon.js classes extend or call it: `Display` -> `PhysicalDisplay` -> `Portal`. Do not rewrite in the adapter what the core can hold.
+- Import Babylon.js module by module, with the extension: `@babylonjs/core/Meshes/mesh.js`. Use `import type` for types.
+- ESM with NodeNext: relative imports end in `.js`. The compiler options are strict, with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+- Comments say why, in plain English. No em dash anywhere: code, comments, documentation, commit messages.
+- A shader exists twice, in GLSL and in WGSL, side by side in `materials/shaders.ts`. Change both in the same edit.
+- A material of the library outputs colors multiplied by their alpha and blends with `ALPHA_PREMULTIPLIED_PORTERDUFF`.
+- Never call a hook of a subclass from a constructor of `Display` or `PhysicalDisplay`.
+
+### Checking a change
+
+- Tests run on the null engine of Babylon.js: they check state, order and math, and draw nothing. A change to a shader, to blending or to draw order must also be looked at in an example, on WebGL and with `?webgpu`, and with `?rh`.
+- When bounds of a mesh are rebuilt with `buildBoundingInfo`, pass the world matrix of the mesh. Without it the mesh is culled and sorted as if it stood at the origin.
+- The examples serve Babylon.js unbundled (`optimizeDeps.exclude`). Do not remove that.
+
+### Git
+
+- Commit only when asked, directly on `main`. Do not push unless asked.
+- Commits carry the identity of the author only: no co-author trailer, no mention of a tool or of an assistant, in commits, tags or release notes.
+- The `.claude/` folder is not tracked.
