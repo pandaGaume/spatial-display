@@ -4,13 +4,14 @@ import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine.js";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder.js";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder.js";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { attachDisplay, CameraDisplay, Portal, type DisplayChangeKind } from "@spacexr/spatial-display-babylon";
+import { attachDisplay, CameraDisplay, CylinderSurfaceBuilder, Portal, PortalBuilder, RectSurfaceBuilder, type DisplayChangeKind } from "@spacexr/spatial-display-babylon";
 
 /** A layer the camera of the scene does not draw. */
 const HIDDEN_LAYER = 0x20000000;
@@ -205,7 +206,7 @@ describe("lens mode", () => {
     const engine = makeEngine();
     const { scene, scanner } = makeScene(engine);
     const display = new CameraDisplay({ camera: scanner });
-    const portal = new Portal("gate", scene, { width: 2, height: 1, display, window: true });
+    const portal = new Portal("gate", scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display, window: true }) });
     expect(display.window).toBe(portal);
 
     display.setLens({ scene });
@@ -224,10 +225,19 @@ describe("lens mode", () => {
     const { scene, scanner } = makeScene(engine);
     const display = new CameraDisplay({ camera: scanner });
     display.setLens({ scene });
-    const portal = new Portal("glass", scene, { width: 2, height: 1, display });
+    const portal = new Portal("glass", scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display }) });
     frame(engine, scene);
     expect(portal.screen.material).toMatchObject({ projector: display.imageTransform });
     expect(display.resolution).toEqual({ width: 512, height: 288 });
+
+    // And all around an object, on the wall of a ring: both its faces read the same image.
+    const ring = new PortalBuilder("ring", scene).withSurface(new CylinderSurfaceBuilder({ diameter: 2, height: 1, display, doubleSided: true })).withFrame().withLight().build();
+    expect(ring.screen.material).toMatchObject({ projector: display.imageTransform, backFaceCulling: false });
+    expect(display.texture.renderListPredicate(ring.screen)).toBe(false);
+    expect(display.texture.renderListPredicate(ring.frame as AbstractMesh)).toBe(false);
+    frame(engine, scene);
+    // One image serves the two portals.
+    expect(scene.customRenderTargets).toHaveLength(1);
   });
 
   it("refuses an anchor of another scene, and a viewer of the other handedness", () => {

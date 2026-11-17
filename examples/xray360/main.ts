@@ -12,6 +12,10 @@
  * the two other surfaces of this example, a polygon that is bent and twisted
  * and that circles the machine, and a sphere that closes on a part of it.
  *
+ * The ring and the polygon are portals: the first on the wall of a cylinder
+ * the library builds, with a frame of light on its two rims, the second on a
+ * mesh of the application, whose edge the portal finds and lights.
+ *
  * No mesh is copied: a mesh is drawn solid by the camera of the application
  * and as a wireframe by the lens, from the same vertices.
  *
@@ -33,12 +37,11 @@ import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder.js";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder.js";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder.js";
 import { CreateTorusKnot } from "@babylonjs/core/Meshes/Builders/torusKnotBuilder.js";
-import { CreateTube } from "@babylonjs/core/Meshes/Builders/tubeBuilder.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { attachDisplay, CameraDisplay } from "@spacexr/spatial-display-babylon";
+import { attachDisplay, CameraDisplay, CylinderSurfaceBuilder, MeshSurfaceBuilder, PortalBuilder } from "@spacexr/spatial-display-babylon";
 
 const params = new URLSearchParams(location.search);
 const rightHanded = params.has("rh");
@@ -76,16 +79,15 @@ async function createEngine(): Promise<AbstractEngine> {
 /**
  * A polygon that is not flat, as a mesh of its own vertices: rings of points
  * from the centre to the sides, each pushed in depth by `depth`. Its front is
- * toward -z. Returns the mesh and the line of its edge.
+ * toward -z.
  */
-function createBentPolygon(name: string, scene: Scene, depth: (x: number, y: number) => number): { sheet: Mesh; edge: Vector3[] } {
+function createBentPolygon(name: string, scene: Scene, depth: (x: number, y: number) => number): Mesh {
   const rings = 8;
   const perSide = 6;
   const around = CORNERS.length * perSide;
   const positions = [0, 0, depth(0, 0)];
   // A surface needs texture coordinates, even though a lens does not read the image with them.
   const uvs = [0.5, 0.5];
-  const edge: Vector3[] = [];
   for (let ring = 1; ring <= rings; ring++) {
     for (let k = 0; k < around; k++) {
       const from = CORNERS[Math.floor(k / perSide)] as readonly [number, number];
@@ -95,7 +97,6 @@ function createBentPolygon(name: string, scene: Scene, depth: (x: number, y: num
       const y = (ring / rings) * (from[1] + (to[1] - from[1]) * along);
       positions.push(x, y, depth(x, y));
       uvs.push(0.5 + x / 1.7, 0.5 + y / 1.7);
-      if (ring === rings) edge.push(new Vector3(x, y, depth(x, y)));
     }
   }
   const at = (ring: number, k: number): number => 1 + (ring - 1) * around + (k % around);
@@ -112,9 +113,7 @@ function createBentPolygon(name: string, scene: Scene, depth: (x: number, y: num
   data.uvs = uvs;
   const sheet = new Mesh(name, scene);
   data.applyToMesh(sheet);
-  // The edge is a closed line.
-  edge.push((edge[0] as Vector3).clone());
-  return { sheet, edge };
+  return sheet;
 }
 
 async function main(): Promise<void> {
@@ -199,32 +198,6 @@ async function main(): Promise<void> {
   const hiddenWire = wire("xray.hidden", new Color3(1, 0.62, 0.15));
   const xray = (mesh: AbstractMesh): StandardMaterial => (mesh.layerMask === HIDDEN_LAYER ? hiddenWire : seenWire);
 
-  // --- The ring: an open cylinder, and two rims of light. The node is moved and sized, never the meshes.
-  const ring = new TransformNode("ring", scene);
-  const wall = CreateCylinder("ring.wall", { diameter: 1, height: 1, tessellation: 64, cap: Mesh.NO_CAP }, scene);
-  wall.parent = ring;
-  const light = new StandardMaterial("light", scene);
-  light.disableLighting = true;
-  light.emissiveColor = new Color3(0.55, 0.9, 1);
-  const rims = [1, -1].map((side) => {
-    const rim = CreateTorus(`ring.rim${side}`, { diameter: 1, thickness: 0.012, tessellation: 64 }, scene);
-    rim.parent = ring;
-    rim.material = light;
-    return { rim, side };
-  });
-
-  // --- The polygon: a mesh of its own vertices, bent toward the machine, with a line of light on its edge.
-  // The front of its sheet is toward the -z of the node, which is kept turned away from the machine.
-  const panel = new TransformNode("panel", scene);
-  const { sheet, edge } = createBentPolygon("panel.sheet", scene, bend);
-  sheet.parent = panel;
-  const outline = CreateTube("panel.edge", { path: edge, radius: 0.011, tessellation: 6 }, scene);
-  outline.parent = panel;
-  outline.material = light;
-
-  // --- The sphere: a bubble around a part of the machine. A closed mesh needs nothing more.
-  const bubble = CreateSphere("bubble", { diameter: 1, segments: 32 }, scene);
-
   // --- The lens. This camera is never the camera of the scene: it lends the lens its layers.
   const scanner = new FreeCamera("xray.scanner", Vector3.Zero(), scene, false);
   scanner.layerMask = EVERYDAY_LAYERS | HIDDEN_LAYER;
@@ -245,8 +218,26 @@ async function main(): Promise<void> {
   });
   // The image is the one of the viewer of this scene, at the size of the canvas.
   display.setLens({ scene });
-  // One lens, three surfaces: each shows the part of the same image it covers on screen.
-  const surfaces = [wall, sheet, bubble].map((mesh) => attachDisplay(mesh, display));
+
+  // --- One lens, three surfaces: each shows the part of the same image it covers on screen.
+  const rim = new Color3(0.55, 0.9, 1);
+  const halo = { color: new Color3(0.1, 0.55, 1), size: 0.07, intensity: 1.1 };
+
+  // The ring: a portal on the wall of a cylinder, with a frame of light on its two rims. It is sized through
+  // the portal, which keeps the section of its frame, never by scaling its node.
+  const ring = new PortalBuilder("ring", scene).withSurface(new CylinderSurfaceBuilder({ diameter: 1.7, height: 0.75, display })).withFrame().withLight(true, rim).withGlow(halo).build();
+
+  // The polygon: a mesh of its own vertices, bent toward the machine. The portal takes it as it is, finds
+  // its edge and lights it. The front of the sheet is toward the -z of its node, which is kept turned away
+  // from the machine.
+  const panel = new TransformNode("panel", scene);
+  const sheet = createBentPolygon("panel.sheet", scene, bend);
+  sheet.parent = panel;
+  const polygon = new PortalBuilder("polygon", scene).withSurface(new MeshSurfaceBuilder(sheet, { display })).withLight(true, rim).withGlow(halo).build();
+
+  // The sphere: a bubble around a part of the machine. A closed mesh has no edge to frame: it needs no portal.
+  const bubble = CreateSphere("bubble", { diameter: 1, segments: 32 }, scene);
+  const surfaces = [ring, polygon, attachDisplay(bubble, display)];
 
   // --- Controls.
   const input = (id: string): HTMLInputElement => document.getElementById(id) as HTMLInputElement;
@@ -259,19 +250,15 @@ async function main(): Promise<void> {
   let turn = -2.35;
   /** Places and sizes the surface that shows, from the sliders. */
   const place = (): void => {
-    ring.setEnabled(shape.value === "ring");
+    ring.root.setEnabled(shape.value === "ring");
     panel.setEnabled(shape.value === "polygon");
     bubble.setEnabled(shape.value === "sphere");
     const radius = number("radius");
     const size = number("size");
     const height = number("y");
-    // The ring: `size` is the height of its wall.
-    ring.position.y = height;
-    wall.scaling.set(2 * radius, size, 2 * radius);
-    for (const { rim, side } of rims) {
-      rim.scaling.setAll(2 * radius);
-      rim.position.y = (side * size) / 2;
-    }
+    // The ring: its width is the length of its turn, and `size` the height of its wall.
+    ring.root.position.y = height;
+    ring.setDimension(2 * Math.PI * radius, size);
     // The polygon: in front of the hull, its -z turned away from the machine. `size` scales it.
     const distance = radius + 0.4;
     panel.position.set(distance * Math.sin(turn), height, distance * Math.cos(turn));
@@ -328,7 +315,7 @@ async function main(): Promise<void> {
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, scene, camera, scanner, display, surfaces, ring, wall, panel, sheet, bubble, knot, hull, inside, Vector3, HIDDEN_LAYER });
+  Object.assign(window, { engine, scene, camera, scanner, display, surfaces, ring, polygon, panel, sheet, bubble, knot, hull, inside, Vector3, HIDDEN_LAYER });
 }
 
 void main();

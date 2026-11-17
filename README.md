@@ -1,15 +1,23 @@
 # spatial-display
 
-Displays for 3D scenes. A display shows an image, such as the view of a camera of any scene, as a texture: any mesh surface can show it, in the scene of that camera or in another one. A `Portal` is the ready-made surface: a rectangular opening in a frame of light, resizable at run time, with an image that can be made see-through.
+Displays for 3D scenes. A display shows an image, such as the view of a camera of any scene, as a texture: any mesh surface can show it, in the scene of that camera or in another one. A `Portal` is the ready-made surface: a flat rectangle, the wall of a cylinder or a mesh of the application, which wears a frame, a line of light and a glow when asked, can be resized at run time, and shows an image that can be made see-through.
 
 | Package | Contents |
 |---|---|
-| `@spacexr/spatial-display-core` | display interfaces, the `Display` and `PhysicalDisplay` base classes, geometry of the frame and of its halo, image fitting, refresh scheduling. No dependencies, no rendering library. |
-| `@spacexr/spatial-display-babylon` | Babylon.js: `CameraDisplay`, `TextureDisplay`, `attachDisplay`, `Portal`, and the materials of the screen and of the neon. Peer dependency on `@babylonjs/core` 9. |
+| `@spacexr/spatial-display-core` | display interfaces, the `Display` and `PhysicalDisplay` base classes, geometry of the frame of a surface and of its halo, of the wall of a cylinder, the open edges of a mesh, image fitting, refresh scheduling. No dependencies, no rendering library. |
+| `@spacexr/spatial-display-babylon` | Babylon.js: `CameraDisplay`, `TextureDisplay`, `attachDisplay`, `Portal`, `PortalBuilder` and the surfaces a portal is built on, and the materials of the screen and of the neon. Peer dependency on `@babylonjs/core` 9. |
+
+## Install
+
+```bash
+npm install @spacexr/spatial-display-babylon @spacexr/spatial-display-core
+```
+
+`@babylonjs/core` 9 is a peer dependency.
 
 ## Getting started
 
-Requires Node 20 or later. The repository is an npm workspace.
+To work in this repository: it requires Node 20 or later, and is an npm workspace.
 
 ```bash
 npm install
@@ -36,14 +44,19 @@ The portal example opens on http://localhost:5183; add `?window` for the window 
 ## Use
 
 ```ts
-import { CameraDisplay, Portal, attachDisplay } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, PortalBuilder, RectSurfaceBuilder, attachDisplay } from "@spacexr/spatial-display-babylon";
 
 // The view of a camera. `world` is a scene the application never renders:
 // the display renders it itself, and nothing of it reaches the canvas.
 const display = new CameraDisplay({ camera: world.activeCamera!, drive: "display", resolution: { width: 1280, height: 720 } });
 
-// 1. In a portal.
-const portal = new Portal("gate", scene, { width: 1.6, height: 0.9, display, opacity: 0.85 });
+// 1. In a portal: a surface that carries the display, and what it wears on its edges.
+const portal = new PortalBuilder("gate", scene)
+  .withSurface(new RectSurfaceBuilder({ width: 1.6, height: 0.9, display, opacity: 0.85 }))
+  .withFrame()
+  .withLight()
+  .withGlow()
+  .build();
 portal.root.position.set(0, 1.5, 2);
 portal.setDimension(2, 1.2);
 portal.opacity = 0.5;
@@ -60,9 +73,12 @@ tvMaterial.emissiveTexture = display.texture;
 ```
 core      Display             an image of a given size in pixels: resolution, resize()
 core        PhysicalDisplay   and a rectangle of the world: dimension, setDimension(), pixelPerUnit, dpi
-babylon       Portal          and the meshes that draw it: frame, screen, the display it shows
+babylon       Portal          and the meshes that draw it: a surface, its frame, its glow, the display it shows
 babylon     CameraDisplay     the view of a camera, as a render target: a screen, a window, or a lens
 babylon   TextureDisplay      a texture the application already has: a picture, a video
+babylon   PortalBuilder       builds a portal step by step: a surface, a frame, a light, a glow
+babylon   RectSurfaceBuilder, CylinderSurfaceBuilder, MeshSurfaceBuilder
+                              what a portal shows its image on: a flat rectangle, a ring or a bent screen, a mesh
 ```
 
 Two sizes change apart. `resize(width, height)` is for the image, in pixels. `setDimension(width, height)` is for the rectangle, in world units. Interfaces are named `IDisplay`, `IPhysicalDisplay`, `ITextureDisplay`, and so on for the options of each class.
@@ -110,23 +126,85 @@ The colors of a render target are multiplied by their alpha, those of a picture 
 
 ## Portal
 
-`width` and `height` are those of the opening; the frame goes around it. `setDimension()`, `frameSection` and `glowSize` rewrite vertex positions and rebuild nothing, so a portal can change size at every frame.
+A portal is a surface that shows a display, and what that surface wears on its edges. `PortalBuilder` builds one step by step:
 
-The frame is a line of light and the glow around it:
+```ts
+const portal = new PortalBuilder("gate", scene)
+  .withSurface(new RectSurfaceBuilder({ width: 1.6, height: 0.9, display }))
+  .withFrame(true, 0.02)                              // a tube of square section, 0.02 wide
+  .withLight(true, { r: 1, g: 1, b: 1 })              // that tube is a line of light
+  .withGlow({ color: { r: 0.1, g: 0.55, b: 1 }, size: 0.18, intensity: 1.4 })
+  .build();
+```
 
-- The line (`portal.frame`) is an opaque tube of square section with mitred corners. `frameSection` is its width, `lineColor` its color (white by default). However thin or far, it never shows under `neon.minLineWidth` pixels (1.5 by default): with a section of 0 the line is a hairline.
-- The glow (`portal.glow`) spreads on both sides of the line: `glowColor` (an electric blue by default), `glowSize` in world units, `glowIntensity`. With a size of 0 the line stands bare. The glow is made of ribbons that turn to face the eye and whose ends are rounded on the corners, so it keeps its width from every angle and needs no post-process.
-- The image of the opening is always drawn over the glow, from every angle: the glow shows around the opening, and through an image that is see-through, never on top of it.
+| Step | What it sets | Default |
+|---|---|---|
+| `withSurface(surface)` | what the portal shows its image on: a mesh of the application, or a builder of surfaces. The surface carries its display and the way to show it. | required |
+| `withFrame(on, section?)` | a tube of square section along the edges of the surface | none |
+| `withLight(on, color?)` | lights those edges: the frame becomes a line of light; with no frame, a hairline is drawn along them | none |
+| `withGlow(glow)` | a glow on both sides of the edges: `true`, or its `color`, `size`, `intensity`, `falloff`, `cover` and `flow` | none |
+| `build()` | the `Portal` | |
 
-Those four are properties of the portal; `portal.neon`, the material of the frame, holds them too, with `glowFalloff`, `cover` and `flow` for waves of light that travel along the frame. The glow fades from the line outward whatever its intensity. With a `cover` of 1 (default) it tints what stands behind it, so it reads on any color; with 0 it only adds to the background, and is lost on a bright one.
+Nothing is worn unless asked: with a surface alone, a portal is a mesh that shows a display. `new Portal(name, scene, { surface, frame, light, glow })` takes the same in one call.
 
-`portal.root` is the node the application places and parents. Facing the front of a portal, the local x axis reads to the right and y upward: the front looks toward -z in a left-handed scene, as the planes of Babylon.js, and toward +z in a right-handed one.
+### The surface
 
-The resolution of a portal is the one of its display: showing a display takes its resolution, and `portal.resize()` resizes that display. With `pixelsPerUnit`, the display is resized along with the opening to keep that density; each change then allocates a new render target, so leave it out for a portal whose size is animated and choose a `fit` instead.
+A surface is what shows the image, and gives the lines the frame runs along. Each builder takes the display (`display`) and the options of `attachDisplay` (`opacity`, `fit`, `doubleSided`, `border`, `useImageAlpha`, `chromaKey`), plus `pixelsPerUnit`.
+
+A flat rectangle. The frame goes around it; it is the one surface that can be a window (see the window mode below):
+
+```ts
+new RectSurfaceBuilder({ width: 1.6, height: 0.9, display });
+```
+
+The wall of a cylinder, with no cap. The frame runs along its two rims. With a display that is a lens, the ring shows what stands in it from every side:
+
+```ts
+const ring = new PortalBuilder("ring", scene)
+  .withSurface(new CylinderSurfaceBuilder({ diameter: 1.7, height: 0.8, display, doubleSided: true }))
+  .withFrame()
+  .withLight()
+  .build();
+```
+
+A share of that wall is a bent screen: `arc` is the share of a whole turn, and `facing` tells which face shows the image, `"outside"` for a wall that bulges toward who faces the portal, `"inside"` for one that bends around them. The frame then goes all around the screen:
+
+```ts
+new CylinderSurfaceBuilder({ diameter: 3.2, height: 0.8, arc: 0.18, facing: "inside", display, fit: "cover" });
+```
+
+A mesh the application already has, of any shape. The portal does not own it: the mesh is the node of the portal, it is placed as before, and gets its former material back when the portal is disposed. The frame runs along the open edges of the mesh, which the portal finds from its triangles; a mesh with no edge, as a sphere, gets none.
+
+```ts
+// The mesh alone: the portal is given a display later, with portal.display.
+const panel = new PortalBuilder("panel", scene).withSurface(sheet).withLight().withGlow().build();
+
+// With its display, and the lines of the frame when the edges of the mesh are not the ones wanted.
+new MeshSurfaceBuilder(sheet, { display, doubleSided: true, outlines });
+```
+
+`IPortalSurfaceBuilder` is the interface of those builders: an application can write its own, for a surface of another shape.
+
+### Frame, light and glow
+
+- The frame (`portal.frame`) is an opaque tube of square section that stands against the edges of the surface, with mitred corners. `frameSection` is its width. Lit, it is the line of light, of the color `lineColor` (white by default). Not lit, it is a plain solid of the color `frameColor`, which takes the light of the scene.
+- The light draws the line however thin or far the frame is: never under `neon.minLineWidth` pixels (1.5 by default). With no frame the line is a hairline on the edge of the surface.
+- The glow spreads on both sides of the edges: `glowColor` (an electric blue by default), `glowSize` in world units, `glowIntensity`. It is made of ribbons that turn to face the eye, so it keeps its width from every angle and needs no post-process. Their ends are rounded on the corners of a rectangle; along a curve, as the rim of a ring, they meet on mitres and overlap nowhere.
+- The image of the surface is always drawn over the glow: the glow shows around the surface, and through an image that is see-through, never on top of it.
+
+All three can be put on and taken off at any time: `portal.framed`, `portal.lit`, `portal.glowing`. `portal.neon`, the material of the light and of the glow, holds `glowFalloff`, `cover` and `flow` for waves of light that travel along the edges; it is null for a portal with neither. The glow fades from the line outward whatever its intensity. With a `cover` of 1 (default) it tints what stands behind it, so it reads on any color; with 0 it only adds to the background, and is lost on a bright one.
+
+### Size and place
+
+`portal.root` is the node the application places and parents. Facing the front of a flat portal, the local x axis reads to the right and y upward: the front looks toward -z in a left-handed scene, as the planes of Babylon.js, and toward +z in a right-handed one. The middle of a wall stands on that side too, or behind the node for a wall that shows its inside.
+
+`setDimension(width, height)` sizes the surface, in world units: the rectangle, or the wall of a cylinder, whose width is the length of its turn. It rewrites vertex positions and rebuilds nothing, as do `frameSection` and `glowSize`, so a portal can change size at every frame. A mesh of the application keeps its size: the application scales it itself.
+
+The resolution of a portal is the one of its display: showing a display takes its resolution, and `portal.resize()` resizes that display. With `pixelsPerUnit`, the display is resized along with the surface to keep that density; each change then allocates a new render target, so leave it out for a portal whose size is animated and choose a `fit` instead.
 
 ## Window mode
 
-A portal is a screen by default: its image is glued to the opening, whoever looks at it. With `window`, the opening gives onto the scene of its display instead, and the image follows the eye of the viewer:
+A portal is a screen by default: its image is glued to its surface, whoever looks at it. A flat rectangle can be a window instead: with `window`, it gives onto the scene of its display, and the image follows the eye of the viewer:
 
 ```ts
 // Where the opening stands in the world: a node of that scene. The world lies behind it.
@@ -134,7 +212,12 @@ const anchor = new TransformNode("anchor", world);
 anchor.position.set(0, 1.5, -6);
 
 const display = new CameraDisplay({ camera: world.activeCamera!, drive: "display" });
-const portal = new Portal("gate", scene, { width: 2, height: 1.2, display, window: { anchor } });
+const portal = new PortalBuilder("gate", scene)
+  .withSurface(new RectSurfaceBuilder({ width: 2, height: 1.2, display, window: { anchor } }))
+  .withFrame()
+  .withLight()
+  .withGlow()
+  .build();
 ```
 
 - The two scenes stay apart. The portal and its viewer are in one; the display draws the other with a camera of its own, which it places where the viewer stands as seen from the opening. The frustum of that camera is skewed so that its sides pass through the edges of the opening: what it draws is exactly what shows in the opening, from any place. Its near plane is the plane of the opening, so nothing of the world shows in front of it.
@@ -143,7 +226,7 @@ const portal = new Portal("gate", scene, { width: 2, height: 1.2, display, windo
 - The image is drawn after Babylon.js has updated the camera of the viewer, in the same frame: it does not lag behind the viewer.
 - The image always fills the opening: `fit` does not apply.
 
-The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on their side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
+The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. A portal with no glow has none behind it either, unless `window.glow` asks for them. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on their side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
 
 `display.setWindow(window, anchor)` does the same for a display shown on a surface of the application, `window` being any object with a `root` node and the `width` and `height` of an opening centred on it.
 
@@ -165,7 +248,11 @@ const wire = new StandardMaterial("wire", scene);
 wire.wireframe = true;
 
 const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire, clearColor: { r: 0, g: 0, b: 0, a: 0.8 } });
-const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: true });
+const portal = new PortalBuilder("xray", scene)
+  .withSurface(new RectSurfaceBuilder({ width: 1.6, height: 1, display, window: true }))
+  .withFrame()
+  .withLight()
+  .build();
 ```
 
 - `overrideMaterial` draws the meshes with another material in the image of the display, and with their own everywhere else: one material for all, or a function that picks one for each mesh. Nothing is copied: a mesh is drawn solid by the camera of the application and as a wireframe by the screen, from the same vertices.
@@ -187,11 +274,18 @@ const display = new CameraDisplay({
 });
 display.setLens({ scene }); // follow the camera of this scene
 
-// An open cylinder around the machine: its wall shows the machine as a wireframe, from every side.
-attachDisplay(ring, display);
+// A ring around the machine: its wall shows the machine as a wireframe, from every side.
+const ring = new PortalBuilder("ring", scene)
+  .withSurface(new CylinderSurfaceBuilder({ diameter: 1.7, height: 0.8, display, doubleSided: true }))
+  .withFrame()
+  .withLight()
+  .build();
+
+// Or on any mesh the application has, with no portal.
+attachDisplay(bubble, display);
 ```
 
-Any mesh that has texture coordinates will do. The example has three: the ring, a polygon made of its own vertices, bent and twisted, that circles the machine, and a sphere that closes on a part of it.
+Any mesh that has texture coordinates will do. The example has three: the ring, a portal on the wall of a cylinder; a polygon made of its own vertices, bent and twisted, that circles the machine, which a portal takes as it is and whose edge it lights; and a sphere that closes on a part of the machine.
 
 - The display draws with a camera of its own, a copy of the one of the viewer: same place, same direction, same projection. The copy is made after Babylon.js has updated the camera of the viewer, in the same frame. The camera given to the display lends its scene and its layer mask, as for a window, and is not moved.
 - The image takes the size of the canvas, so a surface is as sharp as the rest of the screen; `scale` in the lens asks for less, or for more. `resize()` does not hold.
@@ -211,20 +305,48 @@ The two materials are written in GLSL and in WGSL, and pick their language from 
 | `npm run build` | compile the packages (`tsc -b`) |
 | `npm run typecheck` | packages plus tests and examples |
 | `npm test` | Vitest, with the null engine of Babylon.js |
-| `npm run example:portal` | the portal example, served by Vite from the sources |
+| `npm run example:portal` | the portal example, served by Vite from the sources: a flat portal, a bent screen |
 | `npm run example:xray` | the x-ray example: a window onto its own scene |
-| `npm run example:xray360` | the x-ray 360 example: a lens on a cylinder, on a polygon that is not flat, on a sphere |
+| `npm run example:xray360` | the x-ray 360 example: a lens on a ring, on a polygon that is not flat, on a sphere |
+
+## Releasing
+
+The core and the Babylon.js adapter are published to npm under the `@spacexr` organization, at the same version, by [.github/workflows/release.yaml](.github/workflows/release.yaml) when a tag `vX.Y.Z` is pushed. The workflow checks that the tag carries the version of every `packages/*/package.json`, builds, runs the type check and the tests, and publishes each package from its workspace.
+
+```bash
+npm version 0.2.0 --workspaces --no-git-tag-version   # both packages
+# then set the same version in the peer range of babylon on the core
+git commit -am "Release 0.2.0"
+git tag v0.2.0
+git push origin main
+git push origin v0.2.0
+```
+
+The workflow publishes through npm trusted publishing (OIDC), with no token. A package must exist on npm before a trusted publisher can be set on it, so the first version is published by hand, from the root, after `npm run build`:
+
+```bash
+npm publish --workspace @spacexr/spatial-display-core --access public
+npm publish --workspace @spacexr/spatial-display-babylon --access public
+```
+
+Then, on npmjs.com, each of the two packages gets this repository and `release.yaml` as its trusted publisher.
+
+Each package is published with its own `README.md` and a copy of the license; `npm pack --dry-run --workspace <name>` lists what a tarball holds.
 
 ## State and limits
 
-The example has been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. Nothing has run in a headset.
+The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. Nothing has run in a headset.
 
-The example serves Babylon.js unbundled (`optimizeDeps.exclude` in its Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
+The examples serve Babylon.js unbundled (`optimizeDeps.exclude` in their Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
 
 - A window draws one image, for the camera of the scene its opening stands in. In a headset both eyes get that same image: the world behind the opening shifts as the head moves, but has no depth of its own. A portal seen through another display, or by a second camera, shows the image drawn for the first.
 - A window keeps its last image when the viewer goes behind its opening.
+- Only a flat rectangle can be a window.
 - A lens draws one image too, for the camera of the scene it follows, with the same limits in a headset and for a second camera. It cuts nothing in front of its surfaces.
 - A mesh needs texture coordinates to be a surface, even for a lens, which does not use them.
+- The glow of a portal is drawn before its whole surface. On a hollow surface that shows both its faces, as a ring, the far wall is therefore drawn over the glow of the near rim: seen from outside, the near rim keeps its line but shows no glow against the inside of the ring.
+- The frame of a portal on a mesh of the application is counted in the space of that mesh: a mesh that is scaled thickens its tube. The light and the glow keep their size.
+- The rim of a ring seen exactly edge on ends its glow square, where the rim turns away from the eye.
 - The scale of the anchor of a window is taken as the same along its three axes.
 - No pointer input goes through a surface to the scene behind it yet.
 - A portal does not show in itself.

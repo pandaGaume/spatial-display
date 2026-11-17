@@ -2,7 +2,7 @@
   "name": "spatial-display",
   "private": true,
   "version": "0.1.0",
-  "description": "Displays for 3D scenes: the view of any camera of any scene shown on any mesh surface, and a resizable portal with a neon frame.",
+  "description": "Displays for 3D scenes: the view of any camera of any scene shown on any mesh surface, and a portal on a rectangle, a cylinder or a mesh, with a frame, a light and a glow.",
   "license": "Apache-2.0",
   "author": "Guillaume Pelletier (SpaceXR)",
   "type": "module",

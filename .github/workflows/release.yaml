@@ -1,0 +1,59 @@
+name: release
+
+# Publishes the core and the Babylon.js adapter to npm when a version tag is pushed:
+#   git tag v0.2.0 && git push origin v0.2.0
+# The tag must carry the version written in every packages/*/package.json.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # OIDC token for npm trusted publishing and provenance.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Check that the tag matches the package versions
+        run: |
+          for manifest in packages/*/package.json; do
+            version=$(node -p "require('./$manifest').version")
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::$manifest is at $version, the tag is $GITHUB_REF_NAME"
+              exit 1
+            fi
+          done
+
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later; Node 20 ships npm 10.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11
+
+      - run: npm ci
+      - run: npm run build
+      # Type-checks tests and examples too, which `build` skips.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm publish --workspace @spacexr/spatial-display-core --access public --provenance
+      - run: npm publish --workspace @spacexr/spatial-display-babylon --access public --provenance
+
+      - name: Dump npm debug logs on failure
+        if: failure()
+        run: |
+          npm --version
+          npm config list
+          for f in /home/runner/.npm/_logs/*.log; do
+            echo "----- $f -----"
+            cat "$f"
+          done
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true

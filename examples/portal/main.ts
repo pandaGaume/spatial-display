@@ -7,6 +7,10 @@
  *
  * The room also holds a second display, of a camera of the room itself, shown
  * on a sphere and on a slab: any mesh with texture coordinates is a surface.
+ * A third portal shows it on a bent screen, a share of the wall of a cylinder.
+ *
+ * The portals are built step by step: a surface, then a frame, a light and a
+ * glow, each of which the controls put on and take off.
  *
  * The portal can also show the world with a see-through background, a picture
  * with transparent parts, and a picture on a green screen: the colored bars
@@ -36,7 +40,7 @@ import { CreateTorusKnot } from "@babylonjs/core/Meshes/Builders/torusKnotBuilde
 import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { CameraDisplay, Portal, TextureDisplay, attachDisplay, type ITextureDisplay } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, CylinderSurfaceBuilder, PortalBuilder, RectSurfaceBuilder, TextureDisplay, attachDisplay, type ITextureDisplay } from "@spacexr/spatial-display-babylon";
 import type { DisplayFit, DisplayRefresh } from "@spacexr/spatial-display-core";
 
 const params = new URLSearchParams(location.search);
@@ -105,7 +109,8 @@ function createWorld(engine: AbstractEngine): { scene: Scene; camera: ArcRotateC
   const glass = colored(scene, "glass", new Color3(0.2, 0.5, 1));
   glass.alpha = 0.5;
   bubble.material = glass;
-  const ring = new Portal("ring", scene, { width: 1.3, height: 1.3, frameSection: 0.05, neon: { glowSize: 0.3 } });
+  // A portal with nothing to show: a frame of light around an empty square.
+  const ring = new PortalBuilder("ring", scene).withSurface(new RectSurfaceBuilder({ width: 1.3, height: 1.3 })).withFrame(true, 0.05).withLight().withGlow({ size: 0.3 }).build();
   ring.root.position.set(2.6, 1.7, 0);
   ring.root.billboardMode = 7;
 
@@ -163,13 +168,13 @@ async function main(): Promise<void> {
   // lies behind it.
   const anchor = new TransformNode("anchor", world.scene);
   anchor.position.set(0, 1.25, rightHanded ? 6 : -6);
-  const portal = new Portal("gate", room, {
-    width: 1.6,
-    height: 0.9,
-    display: worldDisplay,
-    opacity: windowMode ? 1 : 0.9,
-    ...(windowMode ? { window: { anchor } } : {}),
-  });
+  // The surface carries its display; the frame, its light and its glow are asked for one by one.
+  const portal = new PortalBuilder("gate", room)
+    .withSurface(new RectSurfaceBuilder({ width: 1.6, height: 0.9, display: worldDisplay, opacity: windowMode ? 1 : 0.9, ...(windowMode ? { window: { anchor } } : {}) }))
+    .withFrame()
+    .withLight()
+    .withGlow()
+    .build();
   portal.root.position.set(0, 1.25, 0);
 
   // --- The same display on an ordinary mesh, framed in its own way.
@@ -185,6 +190,17 @@ async function main(): Promise<void> {
   const sphere = CreateSphere("sphere", { diameter: 0.9, segments: 32 }, room);
   sphere.position.set(1.9, 0.75, 0.6);
   attachDisplay(sphere, roomDisplay);
+
+  // --- The same display on a bent screen: a share of the wall of a cylinder, which bends around who faces it.
+  // Its node is the axis of the cylinder: the wall stands behind it.
+  const curve = new PortalBuilder("curve", room)
+    .withSurface(new CylinderSurfaceBuilder({ diameter: 3.2, height: 0.8, arc: 0.18, facing: "inside", display: roomDisplay, fit: "cover" }))
+    .withFrame()
+    .withLight(true, new Color3(1, 0.9, 0.7))
+    .withGlow({ color: new Color3(1, 0.45, 0.1), size: 0.12 })
+    .build();
+  curve.root.position.set(2.4, 1.35, rightHanded ? 1.2 : -1.2);
+  curve.root.rotation.y = rightHanded ? -0.5 : 0.5;
 
   // --- Pictures: one with transparent parts, the same one on a green screen.
   const picture = new Texture("alpha-test.png", room);
@@ -226,6 +242,15 @@ async function main(): Promise<void> {
   input("width").addEventListener("input", resize);
   input("height").addEventListener("input", resize);
   input("section").addEventListener("input", () => (portal.frameSection = number("section")));
+  // What the portal wears, put on and taken off: the bent screen follows.
+  const dress = (): void => {
+    for (const each of [portal, curve]) {
+      each.framed = input("frame").checked;
+      each.lit = input("light").checked;
+      each.glowing = input("glow").checked;
+    }
+  };
+  for (const id of ["frame", "light", "glow"]) input(id).addEventListener("change", dress);
   input("glowSize").addEventListener("input", () => (portal.glowSize = number("glowSize")));
   input("glowIntensity").addEventListener("input", () => (portal.glowIntensity = number("glowIntensity")));
   input("glowColor").addEventListener("input", () => (portal.glowColor = Color3.FromHexString(input("glowColor").value)));
@@ -255,7 +280,7 @@ async function main(): Promise<void> {
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, room, world, portal, anchor, worldDisplay, roomDisplay, pictureDisplay, greenDisplay, show, Vector3 });
+  Object.assign(window, { engine, room, world, portal, curve, anchor, worldDisplay, roomDisplay, pictureDisplay, greenDisplay, show, Vector3 });
 }
 
 void main();

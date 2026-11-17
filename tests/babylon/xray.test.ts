@@ -7,7 +7,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { CameraDisplay, Portal, WINDOW_LAYER_MASK } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, Portal, RectSurfaceBuilder, WINDOW_LAYER_MASK } from "@spacexr/spatial-display-babylon";
 
 /** A layer the camera of the scene does not draw. */
 const HIDDEN_LAYER = 0x20000000;
@@ -72,7 +72,7 @@ describe("a window onto its own scene", () => {
     const { scene, viewer, scanner, seen, hidden, frame } = makeScene();
     const wire = new StandardMaterial("wire", scene);
     const display = new CameraDisplay({ camera: scanner, overrideMaterial: wire });
-    const portal = new Portal("xray", scene, { width: 2, height: 1, display, window: true });
+    const portal = new Portal("xray", scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display, window: true }), frame: true, light: true, glow: true });
     portal.root.position.set(0, 0, 1);
 
     // No anchor was given: the opening gives onto the scene it stands in, from where it stands.
@@ -89,7 +89,7 @@ describe("a window onto its own scene", () => {
 
     // The portal does not show in its own image: neither its screen, nor its frame, nor the glow of its frame.
     const shows = display.texture.renderListPredicate;
-    expect([portal.screen, portal.frame, portal.glow].map((mesh) => shows(mesh))).toEqual([false, false, false]);
+    expect([portal.screen, portal.frame, portal.glow].map((mesh) => shows(mesh as AbstractMesh))).toEqual([false, false, false]);
     expect(shows(seen)).toBe(true);
     expect(shows(hidden)).toBe(true);
 
@@ -108,6 +108,6 @@ describe("a window onto its own scene", () => {
     expect(eye.minZ).toBeCloseTo(5, 1);
 
     portal.display = null;
-    expect(shows(portal.frame)).toBe(true);
+    expect(shows(portal.frame as AbstractMesh)).toBe(true);
   });
 });

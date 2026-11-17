@@ -1,9 +1,18 @@
 {
   "name": "@spacexr/spatial-display-core",
   "version": "0.1.0",
-  "description": "Renderer-agnostic contract and math for spatial displays: display interfaces, frame geometry, image fitting, refresh scheduling.",
+  "description": "Renderer-agnostic contract and math for spatial displays: display interfaces and base classes, geometry of the frame of a surface and of its halo, image fitting, refresh scheduling.",
   "license": "Apache-2.0",
   "author": "Guillaume Pelletier (SpaceXR)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pandaGaume/spatial-display.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/pandaGaume/spatial-display#readme",
+  "bugs": {
+    "url": "https://github.com/pandaGaume/spatial-display/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,7 +25,9 @@
   },
   "files": [
     "dist",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "LICENSE",
+    "README.md"
   ],
   "sideEffects": false,
   "publishConfig": {

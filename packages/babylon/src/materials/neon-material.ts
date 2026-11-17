@@ -25,6 +25,8 @@ export interface INeonMaterialOptions {
   lineWidth?: number;
   /** Smallest width of the line on screen, in pixels: from afar, or with a width of 0, the line stays a hairline. Default 1.5. */
   minLineWidth?: number;
+  /** False for a line that gives no light: it is not drawn, and the glow keeps its own color against it. Default true. */
+  lit?: boolean;
   /** Color of the glow around the line. Default: an electric blue. */
   glowColor?: Readonly<IColor3Like>;
   /** How far the glow reaches from the line, in world units. 0 for the bare line. Default 0.18. */
@@ -53,8 +55,8 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
  * Material of the glow of a line of light, and of that line as seen from afar.
  *
  * It expects ribbons as the core package builds them along the sides of a
- * frame (`createRectFrameHalo`): their normals and their second set of texture
- * coordinates tell the shader where to spread the light.
+ * frame (`createFrameHalo`): their normals, their tangents and their second
+ * set of texture coordinates tell the shader where to spread the light.
  *
  * It is not lit, and ignores fog, clip planes and instances. The glow fades
  * out, so the material is always blended over what stands behind it.
@@ -65,7 +67,7 @@ export class NeonMaterial extends ShaderMaterial {
 
   private readonly line = new Color3();
   private readonly glow = new Color3();
-  /** x width in world units, y smallest width in pixels, z height of the viewport in pixels. */
+  /** x width in world units, y smallest width in pixels, z height of the viewport in pixels, w 1 when the line is lit. */
   private readonly lineShape = new Vector4();
   /** x radius in world units, y intensity, z falloff, w cover. */
   private readonly glowShape = new Vector4();
@@ -80,7 +82,7 @@ export class NeonMaterial extends ShaderMaterial {
       scene,
       webgpu ? { vertexSource: NEON_VERTEX_WGSL, fragmentSource: NEON_FRAGMENT_WGSL } : { vertexSource: NEON_VERTEX_GLSL, fragmentSource: NEON_FRAGMENT_GLSL },
       {
-        attributes: ["position", "normal", "uv", "uv2"],
+        attributes: ["position", "normal", "tangent", "uv", "uv2"],
         uniforms: ["worldView", "projection", "lineColor", "glowColor", "lineShape", "glowShape", "neonFlow"],
         shaderLanguage: webgpu ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
       },
@@ -93,7 +95,7 @@ export class NeonMaterial extends ShaderMaterial {
     const glow = options.glowColor ?? NEON_BLUE;
     this.line.set(line.r, line.g, line.b);
     this.glow.set(glow.r, glow.g, glow.b);
-    this.lineShape.set(Math.max(0, options.lineWidth ?? 0.012), Math.max(0, options.minLineWidth ?? 1.5), 1, 0);
+    this.lineShape.set(Math.max(0, options.lineWidth ?? 0.012), Math.max(0, options.minLineWidth ?? 1.5), 1, (options.lit ?? true) ? 1 : 0);
     this.glowShape.set(Math.max(0, options.glowSize ?? 0.18), Math.max(0, options.glowIntensity ?? 1.4), Math.max(0.01, options.glowFalloff ?? 2.5), clamp01(options.cover ?? 1));
     this.flow = { amplitude: 0, waves: 4, speed: 1.5, ...options.flow };
     this.setColor3("lineColor", this.line);
@@ -106,7 +108,7 @@ export class NeonMaterial extends ShaderMaterial {
     // The smallest width of the line is counted in pixels of what is drawn into: the canvas, or the image of a display.
     this.onBindObservable.add(() => {
       const shape = this.lineShape;
-      this.getEffect()?.setFloat4("lineShape", shape.x, shape.y, scene.getEngine().getRenderHeight(), 0);
+      this.getEffect()?.setFloat4("lineShape", shape.x, shape.y, scene.getEngine().getRenderHeight(), shape.w);
     });
   }
 
@@ -136,6 +138,16 @@ export class NeonMaterial extends ShaderMaterial {
 
   set minLineWidth(value: number) {
     this.lineShape.y = Math.max(0, value);
+    this.setVector4("lineShape", this.lineShape);
+  }
+
+  /** See `INeonMaterialOptions.lit`. */
+  get lit(): boolean {
+    return this.lineShape.w === 1;
+  }
+
+  set lit(value: boolean) {
+    this.lineShape.w = value ? 1 : 0;
     this.setVector4("lineShape", this.lineShape);
   }
 

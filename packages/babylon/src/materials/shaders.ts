@@ -135,24 +135,35 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 // ---------------------------------------------------------------------------
 // Neon: the glow of a line of light, and that line as seen from afar.
 //
-// The mesh is a ribbon along each side of a frame. uv2.x is -1 at the start of
-// the side and 1 at its end, uv2.y is -1 on one edge of the ribbon and 1 on
-// the other, `normal` holds the direction of the side and uv.y its length. The
-// vertex shader moves the vertices in view space: the ribbon turns about its
-// side to face the eye, so that the glow keeps its width from every angle, and
-// reaches beyond both ends of the side. The fragment shader measures the
-// distance to the side itself, which rounds those ends: two ribbons meet on a
-// corner with the same round end.
+// The mesh is a ribbon along each side of the outlines of a frame. uv2.x is -1
+// at the start of the side and 1 at its end, uv2.y is -1 on one edge of the
+// ribbon and 1 on the other, `normal` holds the direction of the side and uv.y
+// its length. The vertex shader moves the vertices in view space: the ribbon
+// turns about its side to face the eye, so that the glow keeps its width from
+// every angle. The fragment shader measures the distance to the side itself.
+//
+// `tangent` tells how a ribbon ends on the point its vertex stands on. With a
+// w of 0 the end is round: the ribbon reaches beyond the point, along its
+// side, and the distance to the side rounds it; two ribbons meet on a corner
+// with the same round end, and overlap there. With a w of 1 the end is a
+// mitre: tangent.xyz is the direction of the line on that point, halfway
+// between the two sides that meet there, and the vertices of both ribbons
+// stand on the line that crosses it, so that the ribbons of a curve cover no
+// pixel twice. The distance to the side still rounds the outside of the bend.
+//
+// A node that is scaled stretches the sides, not the light: lengths are
+// counted in world units.
 //
 // The ribbon also draws the line, never under a width given in pixels: where
 // the tube that gives the line its body gets thinner than a pixel, the line
-// still shows.
+// still shows. A line that is not lit is not drawn, and the glow then keeps
+// its own color against it.
 //
-// uv.x runs along the frame, for the light that travels along it.
+// uv.x runs along the outline, for the light that travels along it.
 // lineShape: x width of the line in world units, y its smallest width in
-// pixels, z height of the viewport in pixels.
+// pixels, z height of the viewport in pixels, w 1 when the line is lit.
 // glowShape: x radius in world units, y intensity, z falloff, w cover.
-// neonFlow: x amplitude, y number of waves along the frame, z phase in radians.
+// neonFlow: x amplitude, y number of waves along the outline, z phase in radians.
 //
 // As the display, it outputs colors multiplied by their alpha. The glow hides
 // what stands behind it by its falloff alone, times the cover: it stays a
@@ -163,6 +174,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 export const NEON_VERTEX_GLSL = `precision highp float;
 attribute vec3 position;
 attribute vec3 normal;
+attribute vec4 tangent;
 attribute vec2 uv;
 attribute vec2 uv2;
 uniform mat4 worldView;
@@ -173,7 +185,9 @@ varying float vAlong;
 varying vec3 vRibbon;
 void main(void) {
   vec4 center = worldView * vec4(position, 1.0);
-  vec3 axis = (worldView * vec4(normal, 0.0)).xyz;
+  vec3 run = (worldView * vec4(normal, 0.0)).xyz;
+  float stretch = max(length(run), 0.000001);
+  vec3 axis = run / stretch;
   vec3 across = cross(axis, center.xyz);
   float reach = length(across);
   vec3 side = reach > 0.00001 ? across / reach : vec3(0.0, 1.0, 0.0);
@@ -181,10 +195,22 @@ void main(void) {
   float pixel = mix(abs(center.z), 1.0, projection[3][3]) * 2.0 / (abs(projection[1][1]) * max(lineShape.z, 1.0));
   // The ribbon is wide enough for the glow, and for the line with a pixel to smooth its edge.
   float spread = max(glowShape.x, max(lineShape.x, lineShape.y * pixel) * 0.5 + pixel);
-  gl_Position = projection * vec4(center.xyz + (side * uv2.y + axis * uv2.x) * spread, 1.0);
+  // A round end: beyond the point, along the side.
+  vec3 capped = (side * uv2.y + axis * uv2.x) * spread;
+  // A mitre: on the line that crosses the direction of the point, longer as it leans away from the side.
+  vec3 fold = cross((worldView * vec4(tangent.xyz, 0.0)).xyz, center.xyz);
+  float folded = length(fold);
+  vec3 rib = folded > 0.00001 ? fold / folded : side;
+  float lean = dot(rib, side);
+  // A side seen end on tells little of which way its mitre leans: its ribbon then ends square, across the side.
+  vec3 edge = normalize(mix(side, rib * (lean < 0.0 ? -1.0 : 1.0), smoothstep(0.5, 0.8, abs(lean))));
+  vec3 mitred = edge * (uv2.y * spread / max(dot(edge, side), 0.5));
+  vec3 shift = mix(capped, mitred, tangent.w);
+  gl_Position = projection * vec4(center.xyz + shift, 1.0);
   vAlong = uv.x;
   // Along the side from its start, and across it, in world units; then the length of the side.
-  vRibbon = vec3(mix(-spread, uv.y + spread, uv2.x * 0.5 + 0.5), uv2.y * spread, uv.y);
+  float sideLength = uv.y * stretch;
+  vRibbon = vec3((uv2.x * 0.5 + 0.5) * sideLength + dot(shift, axis), dot(shift, side), sideLength);
 }`;
 
 export const NEON_FRAGMENT_GLSL = `#extension GL_OES_standard_derivatives : enable
@@ -201,21 +227,22 @@ void main(void) {
   // Distance to the side, ends included.
   float beyond = max(max(-vRibbon.x, vRibbon.x - vRibbon.z), 0.0);
   float distanceToLine = length(vec2(vRibbon.y, beyond));
-  // The glow: a wide light in its own color, and a tight one against the line that burns toward the color of the line.
+  // The glow: a wide light in its own color, and a tight one against a lit line that burns toward the color of the line.
   float near = 1.0 - min(distanceToLine / max(glowShape.x, 0.000001), 1.0);
   float wide = pow(near, glowShape.z) * wave;
-  float tight = pow(near, glowShape.z * 6.0) * wave;
+  float tight = pow(near, glowShape.z * 6.0) * wave * lineShape.w;
   vec3 light = (glowColor * wide + lineColor * tight * 0.6) * glowShape.y;
   vec4 glow = vec4(min(light, vec3(1.0)), wide * glowShape.w);
   // The line: never thinner than its smallest width in pixels, with a smooth edge.
   float pixel = max(fwidth(vRibbon.y), 0.0000001);
   float halfLine = max(lineShape.x, lineShape.y * pixel) * 0.5;
-  float line = 1.0 - smoothstep(halfLine - pixel * 0.5, halfLine + pixel * 0.5, distanceToLine);
+  float line = (1.0 - smoothstep(halfLine - pixel * 0.5, halfLine + pixel * 0.5, distanceToLine)) * lineShape.w;
   gl_FragColor = mix(glow, vec4(lineColor, 1.0), line);
 }`;
 
 export const NEON_VERTEX_WGSL = `attribute position: vec3f;
 attribute normal: vec3f;
+attribute tangent: vec4f;
 attribute uv: vec2f;
 attribute uv2: vec2f;
 uniform worldView: mat4x4f;
@@ -227,15 +254,26 @@ varying vRibbon: vec3f;
 @vertex
 fn main(input: VertexInputs) -> FragmentInputs {
   let center: vec4f = uniforms.worldView * vec4f(vertexInputs.position, 1.0);
-  let axis: vec3f = (uniforms.worldView * vec4f(vertexInputs.normal, 0.0)).xyz;
+  let run: vec3f = (uniforms.worldView * vec4f(vertexInputs.normal, 0.0)).xyz;
+  let stretch: f32 = max(length(run), 0.000001);
+  let axis: vec3f = run / stretch;
   let across: vec3f = cross(axis, center.xyz);
   let reach: f32 = length(across);
   let side: vec3f = select(vec3f(0.0, 1.0, 0.0), across / max(reach, 0.00001), reach > 0.00001);
   let pixel: f32 = mix(abs(center.z), 1.0, uniforms.projection[3][3]) * 2.0 / (abs(uniforms.projection[1][1]) * max(uniforms.lineShape.z, 1.0));
   let spread: f32 = max(uniforms.glowShape.x, max(uniforms.lineShape.x, uniforms.lineShape.y * pixel) * 0.5 + pixel);
-  vertexOutputs.position = uniforms.projection * vec4f(center.xyz + (side * vertexInputs.uv2.y + axis * vertexInputs.uv2.x) * spread, 1.0);
+  let capped: vec3f = (side * vertexInputs.uv2.y + axis * vertexInputs.uv2.x) * spread;
+  let fold: vec3f = cross((uniforms.worldView * vec4f(vertexInputs.tangent.xyz, 0.0)).xyz, center.xyz);
+  let folded: f32 = length(fold);
+  let rib: vec3f = select(side, fold / max(folded, 0.00001), folded > 0.00001);
+  let lean: f32 = dot(rib, side);
+  let edge: vec3f = normalize(mix(side, rib * select(1.0, -1.0, lean < 0.0), smoothstep(0.5, 0.8, abs(lean))));
+  let mitred: vec3f = edge * (vertexInputs.uv2.y * spread / max(dot(edge, side), 0.5));
+  let shift: vec3f = mix(capped, mitred, vertexInputs.tangent.w);
+  vertexOutputs.position = uniforms.projection * vec4f(center.xyz + shift, 1.0);
   vertexOutputs.vAlong = vertexInputs.uv.x;
-  vertexOutputs.vRibbon = vec3f(mix(-spread, vertexInputs.uv.y + spread, vertexInputs.uv2.x * 0.5 + 0.5), vertexInputs.uv2.y * spread, vertexInputs.uv.y);
+  let sideLength: f32 = vertexInputs.uv.y * stretch;
+  vertexOutputs.vRibbon = vec3f((vertexInputs.uv2.x * 0.5 + 0.5) * sideLength + dot(shift, axis), dot(shift, side), sideLength);
 }`;
 
 export const NEON_FRAGMENT_WGSL = `varying vAlong: f32;
@@ -252,11 +290,11 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
   let distanceToLine: f32 = length(vec2f(input.vRibbon.y, beyond));
   let near: f32 = 1.0 - min(distanceToLine / max(uniforms.glowShape.x, 0.000001), 1.0);
   let wide: f32 = pow(near, uniforms.glowShape.z) * wave;
-  let tight: f32 = pow(near, uniforms.glowShape.z * 6.0) * wave;
+  let tight: f32 = pow(near, uniforms.glowShape.z * 6.0) * wave * uniforms.lineShape.w;
   let light: vec3f = (uniforms.glowColor * wide + uniforms.lineColor * tight * 0.6) * uniforms.glowShape.y;
   let glow: vec4f = vec4f(min(light, vec3f(1.0)), wide * uniforms.glowShape.w);
   let pixel: f32 = max(fwidth(input.vRibbon.y), 0.0000001);
   let halfLine: f32 = max(uniforms.lineShape.x, uniforms.lineShape.y * pixel) * 0.5;
-  let line: f32 = 1.0 - smoothstep(halfLine - pixel * 0.5, halfLine + pixel * 0.5, distanceToLine);
+  let line: f32 = (1.0 - smoothstep(halfLine - pixel * 0.5, halfLine + pixel * 0.5, distanceToLine)) * uniforms.lineShape.w;
   fragmentOutputs.color = mix(glow, vec4f(uniforms.lineColor, 1.0), line);
 }`;

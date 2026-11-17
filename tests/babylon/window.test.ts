@@ -7,7 +7,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { CameraDisplay, Portal, TextureDisplay, WINDOW_LAYER_MASK } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, Portal, RectSurfaceBuilder, TextureDisplay, WINDOW_LAYER_MASK } from "@spacexr/spatial-display-babylon";
 
 const makeEngine = (): NullEngine => new NullEngine({ renderWidth: 1280, renderHeight: 720, textureSize: 512, deterministicLockstep: false, lockstepMaxSteps: 1 });
 
@@ -138,7 +138,8 @@ describe("window mode", () => {
     const world = makeWorld(engine);
     const anchor = new TransformNode("anchor", world.scene);
     const display = new CameraDisplay({ camera: world.camera, drive: "display" });
-    const portal = new Portal("gate", host.scene, { width: 2, height: 1, display, window: { anchor, glow: { depth: 0.5 } } });
+    // The light behind the opening is asked for: it is set even though the portal itself has no glow.
+    const portal = new Portal("gate", host.scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display, window: { anchor, glow: { depth: 0.5 } } }) });
 
     expect(portal.isWindow).toBe(true);
     expect(display.window).toBe(portal);
@@ -179,10 +180,29 @@ describe("window mode", () => {
     const host = makeHost(engine);
     const world = makeWorld(engine);
     const display = new CameraDisplay({ camera: world.camera });
-    const portal = new Portal("gate", host.scene, { width: 2, height: 1, display });
+    const portal = new Portal("gate", host.scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display }), glow: true });
     expect(portal.isWindow).toBe(false);
     expect(display.window).toBeNull();
     expect(portal.worldGlow).toBeNull();
     expect(display.texture.activeCamera).toBe(world.camera);
+  });
+
+  it("carries the glow of its frame behind the opening, when it has one", () => {
+    const engine = makeEngine();
+    const host = makeHost(engine);
+    const world = makeWorld(engine);
+    const display = new CameraDisplay({ camera: world.camera, drive: "display" });
+    const portal = new Portal("gate", host.scene, { surface: new RectSurfaceBuilder({ width: 2, height: 1, display, window: true }) });
+    // A window with no glow has no light behind it either.
+    expect(portal.isWindow).toBe(true);
+    expect(portal.worldGlow).toBeNull();
+    portal.glowing = true;
+    const glow = portal.worldGlow as AbstractMesh;
+    expect(glow.getScene()).toBe(world.scene);
+    // Twice the size of the glow of the frame, by default.
+    expect(portal.worldGlowDepth).toBeCloseTo(0.36);
+    portal.glowing = false;
+    expect(portal.worldGlow).toBeNull();
+    expect(world.scene.meshes).not.toContain(glow);
   });
 });

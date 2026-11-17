@@ -28,7 +28,7 @@ import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder.js";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder.js";
 import { CreateTorusKnot } from "@babylonjs/core/Meshes/Builders/torusKnotBuilder.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { CameraDisplay, Portal } from "@spacexr/spatial-display-babylon";
+import { CameraDisplay, PortalBuilder, RectSurfaceBuilder } from "@spacexr/spatial-display-babylon";
 
 const params = new URLSearchParams(location.search);
 const rightHanded = params.has("rh");
@@ -156,7 +156,12 @@ async function main(): Promise<void> {
     name: "xray.display",
   });
   // Its display shows the scene it stands in: with no anchor given, the opening gives onto what stands behind it.
-  const portal = new Portal("xray", scene, { width: 1.6, height: 1, display, window: { glow: { depth: 0.25 } }, neon: { glowSize: 0.12 } });
+  const portal = new PortalBuilder("xray", scene)
+    .withSurface(new RectSurfaceBuilder({ width: 1.6, height: 1, display, window: { glow: { depth: 0.25 } } }))
+    .withFrame()
+    .withLight()
+    .withGlow({ size: 0.12 })
+    .build();
   portal.root.position.set(0, 1.25, -1.2 * back);
 
   // --- Controls.

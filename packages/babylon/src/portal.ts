@@ -3,255 +3,312 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js"
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture.js";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
 import { Color3 } from "@babylonjs/core/Maths/math.color.js";
-import type { IColor3Like, IColor4Like } from "@babylonjs/core/Maths/math.like.js";
+import type { IColor3Like } from "@babylonjs/core/Maths/math.like.js";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
-import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
+import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Observer } from "@babylonjs/core/Misc/observable.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
   PhysicalDisplay,
-  createRectFrame,
-  createRectFrameHalo,
+  createFrame,
+  createFrameHalo,
   createRectTunnel,
-  writeRectFrame,
-  writeRectFrameHalo,
+  writeFrame,
+  writeFrameHalo,
   writeRectTunnel,
   type DisplayFit,
-  type IRectFrameGeometry,
-  type IRectFrameHaloGeometry,
+  type IFrameGeometry,
+  type IFrameHaloGeometry,
   type IRectTunnelGeometry,
 } from "@spacexr/spatial-display-core";
 import { WINDOW_LAYER_MASK, type IDisplayChange, type ITextureDisplay } from "./display.js";
 import type { IChromaKey } from "./materials/display-material.js";
-import { NeonMaterial, type INeonMaterialOptions } from "./materials/neon-material.js";
+import { NEON_BLUE, NEON_WHITE, NeonMaterial, type INeonFlow } from "./materials/neon-material.js";
+import { MeshSurfaceBuilder, type IPortalSurface, type IPortalSurfaceBuilder, type IPortalWindowOptions, type IPortalWorldGlowOptions } from "./portal-surface.js";
 import { DisplaySurface, type IDisplaySurfaceOptions } from "./surface.js";
 
-/**
- * The glow of the frame on the far side of a window: walls of light that run
- * from the edges of the opening straight into the world behind it, as the
- * inside of a box. Seen through the opening they give the glow a depth: the
- * wall away from the viewer shows more than the one on their side.
- */
-export interface IPortalWorldGlowOptions {
-  /** How far the walls run into the world, in the units of the opening. Default: twice the size of the glow of the frame. */
-  depth?: number;
-  /** Brightness of the light on the walls. Default: 0.7 times the intensity of the glow of the frame. */
-  intensity?: number;
-  /** How fast the light fades along the walls: 1 for a straight fade, more for a light held close to the frame. Default 2. */
-  falloff?: number;
-  /** Default: the color of the glow of the frame, which it then follows. */
+/** The frame of a portal: a tube of square section that runs along the edges of its surface. */
+export interface IPortalFrameOptions {
+  /** Side of the square section of the tube, in world units. Default 0.012. */
+  section?: number;
+  /** Color of the tube while it is not lit: it then takes the light of the scene, as any solid. Default: a dark gray. */
   color?: Readonly<IColor3Like>;
 }
 
-export interface IPortalWindowOptions {
+/** The light of a portal: a line along the edges of its surface. */
+export interface IPortalLightOptions {
+  /** Color of the line. Default white. */
+  color?: Readonly<IColor3Like>;
+  /** Smallest width of the line on screen, in pixels: from afar, or with no frame to give it a body, the line stays a hairline. Default 1.5. */
+  minWidth?: number;
+}
+
+/** The glow of a portal: a light that spreads on both sides of the edges of its surface. */
+export interface IPortalGlowOptions {
+  /** Default: an electric blue. */
+  color?: Readonly<IColor3Like>;
+  /** How far the glow reaches from the edge, in world units. Default 0.18. */
+  size?: number;
+  /** Brightness of the glow. It does not widen it. Default 1.4. */
+  intensity?: number;
+  /** How fast the glow fades away from the edge: 1 for a straight fade, more for a light held close to it. Default 2.5. */
+  falloff?: number;
   /**
-   * Where the opening stands in the scene the display shows: a node of that
-   * scene, whose frame is the one of the opening. The scene lies behind it:
-   * toward +z in a left-handed scene, toward -z in a right-handed one. Its
-   * scale sizes the world against the opening. Default: the origin of the
-   * scene, unturned; or the portal itself when its display shows the very
-   * scene the portal stands in. The opening then gives onto what stands
-   * behind it, drawn as its display draws it: with other layers, or another
-   * material.
+   * How much the glow hides what stands behind it, from 0 to 1. At 0 it only
+   * adds to the background, as light does, and is lost on a bright one. At 1
+   * (default) it tints the background, so that it reads on any color.
    */
-  anchor?: TransformNode;
-  /** Light on the far side of the opening; false for none. */
-  glow?: false | Readonly<IPortalWorldGlowOptions>;
+  cover?: number;
+  /** Waves of light that travel along the edges. Default: a steady light. */
+  flow?: Partial<INeonFlow>;
 }
 
 export interface IPortalOptions {
   /**
-   * Makes the portal a window: its image is what the viewer sees through the
-   * opening, as if it gave onto the scene of its display, and follows the
-   * viewer as they move. It needs a display that can be a window, as a
-   * `CameraDisplay`; with another one the portal stays a screen. The image
-   * then always fills the opening: `fit` does not apply. Default: a screen.
+   * What the portal shows its image on: a mesh of the application, or what
+   * builds one (`RectSurfaceBuilder`, `CylinderSurfaceBuilder`,
+   * `MeshSurfaceBuilder`). The surface carries its display and the way to
+   * show it.
    */
-  window?: boolean | Readonly<IPortalWindowOptions>;
-  /** Size of the opening, in world units. The frame goes around it. */
-  width: number;
-  height: number;
+  surface: AbstractMesh | IPortalSurfaceBuilder;
+  /** A tube of square section along the edges of the surface. Default: none. */
+  frame?: boolean | Readonly<IPortalFrameOptions>;
   /**
-   * Side of the square section of the frame, in world units: the width of its
-   * line of light. Default 0.012. Whatever its section, the line never shows
-   * thinner than a hairline (`neon.minLineWidth`).
+   * Lights the edges of the surface: the frame becomes a line of light, or,
+   * with no frame, a hairline is drawn along them. Default: none; a frame is
+   * then a plain solid.
    */
-  frameSection?: number;
-  /**
-   * Look of the frame: the color of its line, the color, the size and the
-   * intensity of its glow, the light that travels along it. Default: a white
-   * line in a blue glow. Its `lineWidth` is set by the portal, from `frameSection`.
-   */
-  neon?: Readonly<Omit<INeonMaterialOptions, "lineWidth">>;
-  /** What the opening shows. Without a display the opening is empty: the scene shows through the frame. */
-  display?: ITextureDisplay;
-  /** Opacity of the image in the opening: 1 (default) opaque, 0 invisible. */
-  opacity?: number;
-  /** How the image fills the opening when their proportions differ. Default "stretch". */
-  fit?: DisplayFit;
-  /** Shows the image on the back of the portal too, mirrored. Default false. */
-  doubleSided?: boolean;
-  /** Color of the opening where the image does not reach ("contain"). Default opaque black. */
-  border?: Readonly<IColor4Like>;
-  /** Lets the transparent pixels of the image through. Default: what the texture of the display says of itself. */
-  useImageAlpha?: boolean;
-  /** A color of the image to let through, as the green of a green screen. Default: none. */
-  chromaKey?: Readonly<IChromaKey>;
-  /**
-   * Pixels of the image per world unit. When given, the display is resized
-   * with the opening so that its image keeps that density and the proportions
-   * of the opening. Each change of size then allocates a new render target:
-   * leave it out for a portal whose size is animated.
-   */
-  pixelsPerUnit?: number;
+  light?: boolean | Readonly<IPortalLightOptions>;
+  /** A glow that spreads on both sides of the edges of the surface. Default: none. */
+  glow?: boolean | Readonly<IPortalGlowOptions>;
 }
 
 /**
- * A rectangular opening in a frame of neon, that shows a display.
+ * A surface that shows a display, dressed on its edges with what it is asked
+ * for: a frame, a light, a glow. None of them is there by default.
  *
- * The frame is a line of light, with a glow that spreads on both sides of it.
- * The image of the opening is drawn over the glow: the glow shows around the
- * opening, and through an image that is see-through.
+ * - The frame is a tube of square section that stands against the edges of
+ *   the surface: around a rectangle, along the two rims of a cylinder, along
+ *   the open edges of a mesh. A surface with no edge, as a sphere, has none.
+ * - The light makes that tube a line of light. With no frame it draws a
+ *   hairline along the edges.
+ * - The glow spreads on both sides of the edges. The image of the surface is
+ *   drawn over it: the glow shows around the surface, and through an image
+ *   that is see-through.
  *
- * A portal is a screen by default: its image is glued to the opening. As a
- * window (`window` in its options) the opening gives onto the scene of its
- * display: the image follows the eye of the viewer, and the glow of the frame
- * carries on behind the opening, on walls of light that run into that scene.
+ * `PortalBuilder` builds one step by step. The surface is a flat rectangle
+ * (`RectSurfaceBuilder`), the wall of a cylinder (`CylinderSurfaceBuilder`),
+ * or a mesh of the application.
+ *
+ * A portal is a screen by default: its image is glued to its surface. A flat
+ * rectangle can be a window instead (`window` in its options): it gives onto
+ * the scene of its display, the image follows the eye of the viewer, and the
+ * glow carries on behind the opening, on walls of light that run into that scene.
  *
  * A portal is a physical display. `setDimension` changes the size of its
- * opening, in world units, and `resize` the size of its image, in pixels. Its
+ * surface, in world units, and `resize` the size of its image, in pixels. Its
  * resolution is the one of the display it shows: showing a display takes its
  * resolution, and resizing the portal resizes that display.
  *
- * `root` is what the application places, turns and parents. When facing the
- * front of the portal, the local x axis of `root` reads to the right and its y
- * axis upward: the front looks toward -z in a left-handed scene, as the planes
- * of Babylon.js, and toward +z in a right-handed one. `root` should keep a
- * scale of 1: the opening changes size through `setDimension`, which keeps the
+ * `root` is what the application places, turns and parents. It should keep a
+ * scale of 1: the surface changes size through `setDimension`, which keeps the
  * section of the frame.
  */
 export class Portal extends PhysicalDisplay {
   readonly root: TransformNode;
-  /** The line of light around the opening: a tube of square section, opaque. */
-  readonly frame: AbstractMesh;
-  /** The glow of the line. It spreads on both sides of it, and the image of the opening is drawn over it. */
-  readonly glow: AbstractMesh;
-  /** The opening: a rectangle in the plane of `root`. */
+  /** The mesh that shows the image. */
   readonly screen: AbstractMesh;
-  /** Material of the glow: its color, its size, its intensity, the light that travels along the frame. */
-  readonly neon: NeonMaterial;
 
-  /** The meshes as they are built: their vertices are rewritten at each change of size. */
-  private readonly tubeMesh: Mesh;
-  private readonly glowMesh: Mesh;
-  private readonly tube: IRectFrameGeometry;
-  private readonly halo: IRectFrameHaloGeometry;
-  private readonly lineMaterial: StandardMaterial;
-  private readonly surfaceOptions: IDisplaySurfaceOptions;
   private readonly name: string;
+  private readonly scene: Scene;
+  private readonly surface: IPortalSurface;
+  private readonly look: IPortalLook;
+  private frameOn: boolean;
+  private lightOn: boolean;
+  private glowOn: boolean;
+  private tube: ITube | null = null;
+  private ribbon: IRibbon | null = null;
+  private readonly surfaceOptions: IDisplaySurfaceOptions;
   /** null for a screen. */
   private readonly windowOptions: Readonly<IPortalWindowOptions> | null;
   private readonly worldGlowOptions: IPortalWorldGlowOptions;
   private worldGlowState: IWorldGlow | null = null;
-  private section: number;
-  private surface: DisplaySurface | null = null;
+  private shown: DisplaySurface | null = null;
   private displayObserver: Observer<IDisplayChange> | null = null;
   private _display: ITextureDisplay | null = null;
 
   constructor(name: string, scene: Scene, options: Readonly<IPortalOptions>) {
+    const given = options.surface;
+    const surface = (isMesh(given) ? new MeshSurfaceBuilder(given) : given).build(name, scene);
+    const shown = surface.options;
     super({
-      width: options.width,
-      height: options.height,
+      width: surface.dimension.width,
+      height: surface.dimension.height,
       maxResolution: scene.getEngine().getCaps().maxTextureSize,
-      ...(options.pixelsPerUnit !== undefined ? { pixelsPerUnit: options.pixelsPerUnit } : {}),
+      ...(shown.pixelsPerUnit !== undefined ? { pixelsPerUnit: shown.pixelsPerUnit } : {}),
     });
     this.name = name;
-    this.section = Math.max(0, options.frameSection ?? 0.012);
-    this.windowOptions = options.window ? (options.window === true ? {} : options.window) : null;
-    this.worldGlowOptions = { ...(this.windowOptions?.glow || {}) };
-    this.surfaceOptions = {
-      opacity: options.opacity ?? 1,
-      // The image of a window is the opening itself.
-      fit: this.windowOptions ? "stretch" : (options.fit ?? "stretch"),
-      doubleSided: options.doubleSided ?? false,
-      // Drawn after the glow whatever its opacity: see the order of the meshes below.
-      alwaysBlended: true,
-      ...(options.useImageAlpha !== undefined ? { useImageAlpha: options.useImageAlpha } : {}),
-      ...(options.chromaKey ? { chromaKey: options.chromaKey } : {}),
-      ...(options.border ? { border: options.border } : {}),
+    this.scene = scene;
+    this.surface = surface;
+    this.root = surface.root;
+    this.screen = surface.mesh;
+
+    const frame = typeof options.frame === "object" ? options.frame : {};
+    const light = typeof options.light === "object" ? options.light : {};
+    const glow = typeof options.glow === "object" ? options.glow : {};
+    this.frameOn = !!options.frame;
+    this.lightOn = !!options.light;
+    this.glowOn = !!options.glow;
+    this.look = {
+      section: Math.max(0, frame.section ?? 0.012),
+      frameColor: copyColor(frame.color ?? FRAME_GRAY),
+      lineColor: copyColor(light.color ?? NEON_WHITE),
+      minLineWidth: Math.max(0, light.minWidth ?? 1.5),
+      glowColor: copyColor(glow.color ?? NEON_BLUE),
+      glowSize: Math.max(0, glow.size ?? 0.18),
+      glowIntensity: Math.max(0, glow.intensity ?? 1.4),
+      glowFalloff: glow.falloff ?? 2.5,
+      cover: glow.cover ?? 1,
+      flow: { amplitude: 0, waves: 4, speed: 1.5, ...glow.flow },
     };
 
-    this.root = new TransformNode(name, scene);
-    const size = { width: this.width, height: this.height, section: this.section };
+    this.windowOptions = surface.window ?? null;
+    this.worldGlowOptions = { ...(this.windowOptions?.glow || {}) };
+    this.surfaceOptions = {
+      opacity: shown.opacity ?? 1,
+      // The image of a window is the opening itself.
+      fit: this.windowOptions ? "stretch" : (shown.fit ?? "stretch"),
+      doubleSided: shown.doubleSided ?? false,
+      ...(shown.useImageAlpha !== undefined ? { useImageAlpha: shown.useImageAlpha } : {}),
+      ...(shown.chromaKey ? { chromaKey: shown.chromaKey } : {}),
+      ...(shown.border ? { border: shown.border } : {}),
+    };
 
-    // The glow and the screen are both blended and stand as far from the eye: they are drawn in the order
-    // they are built in. The glow comes first, so that the image is drawn over it and the glow shows around
-    // the opening only, or through an image that is see-through.
-    this.halo = createRectFrameHalo(size);
-    this.glowMesh = new Mesh(`${name}.glow`, scene, this.root);
-    // Positions and texture coordinates are rewritten at each change of size.
-    this.glowMesh.setVerticesData(VertexBuffer.PositionKind, this.halo.positions, true);
-    this.glowMesh.setVerticesData(VertexBuffer.NormalKind, this.halo.axes, false);
-    this.glowMesh.setVerticesData(VertexBuffer.UVKind, this.halo.uvs, true);
-    this.glowMesh.setVerticesData(VertexBuffer.UV2Kind, this.halo.offsets, false);
-    this.glowMesh.setIndices(this.halo.indices);
-    this.glowMesh.isPickable = false;
-    this.neon = new NeonMaterial(`${name}.neon`, scene, { ...options.neon, lineWidth: this.section });
-    this.glowMesh.material = this.neon;
-    this.glow = this.glowMesh;
+    this.dress();
+    this.display = shown.display ?? null;
+  }
 
-    // A unit rectangle, scaled to the opening. Its front reads x to the right and y upward.
-    const rightHanded = scene.useRightHandedSystem;
-    const front = rightHanded ? 1 : -1;
-    const screen = new Mesh(`${name}.screen`, scene, this.root);
-    screen.setVerticesData(VertexBuffer.PositionKind, [-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0]);
-    screen.setVerticesData(VertexBuffer.NormalKind, [0, 0, front, 0, 0, front, 0, 0, front, 0, 0, front]);
-    screen.setVerticesData(VertexBuffer.UVKind, [0, 0, 1, 0, 1, 1, 0, 1]);
-    screen.setIndices(rightHanded ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]);
-    this.screen = screen;
+  /** The tube along the edges of the surface: an opaque mesh. null for a portal with no frame, or whose surface has no edge. */
+  get frame(): AbstractMesh | null {
+    return this.tube?.mesh ?? null;
+  }
 
-    // The body of the line: an opaque tube, which hides and is hidden as any solid does.
-    this.tube = createRectFrame(size);
-    this.tubeMesh = new Mesh(`${name}.frame`, scene, this.root);
-    this.tubeMesh.setVerticesData(VertexBuffer.PositionKind, this.tube.positions, true);
-    this.tubeMesh.setVerticesData(VertexBuffer.NormalKind, this.tube.normals, false);
-    this.tubeMesh.setVerticesData(VertexBuffer.UVKind, this.tube.uvs, true);
-    this.tubeMesh.setIndices(this.tube.indices);
-    this.lineMaterial = new StandardMaterial(`${name}.line`, scene);
-    this.lineMaterial.disableLighting = true;
-    this.lineMaterial.emissiveColor = Color3.FromArray([this.neon.lineColor.r, this.neon.lineColor.g, this.neon.lineColor.b]);
-    this.tubeMesh.material = this.lineMaterial;
-    this.frame = this.tubeMesh;
+  /** The mesh that draws the light and the glow of the edges, under the image. null for a portal with neither. */
+  get glow(): AbstractMesh | null {
+    return this.ribbon?.mesh ?? null;
+  }
 
-    this.layout();
-    this.display = options.display ?? null;
+  /**
+   * Material of the light and of the glow: it also holds their `glowFalloff`,
+   * their `cover`, and `flow` for waves of light that travel along the edges.
+   * null for a portal with neither light nor glow.
+   */
+  get neon(): NeonMaterial | null {
+    return this.ribbon?.material ?? null;
+  }
+
+  /** Whether the portal has a frame. See `IPortalOptions.frame`. */
+  get framed(): boolean {
+    return this.frameOn;
+  }
+
+  set framed(value: boolean) {
+    if (value === this.frameOn) return;
+    this.frameOn = value;
+    this.dress();
+  }
+
+  /** Whether the edges of the surface are lit. See `IPortalOptions.light`. */
+  get lit(): boolean {
+    return this.lightOn;
+  }
+
+  set lit(value: boolean) {
+    if (value === this.lightOn) return;
+    this.lightOn = value;
+    this.dress();
+  }
+
+  /** Whether the edges of the surface glow. See `IPortalOptions.glow`. */
+  get glowing(): boolean {
+    return this.glowOn;
+  }
+
+  set glowing(value: boolean) {
+    if (value === this.glowOn) return;
+    this.glowOn = value;
+    this.dress();
+    // The light behind a window is the glow of the frame carried on.
+    if (this._display) this.buildWorldGlow(this._display);
   }
 
   /** Side of the square section of the frame, in world units. */
   get frameSection(): number {
-    return this.section;
+    return this.look.section;
   }
 
   set frameSection(value: number) {
     value = Math.max(0, value);
-    if (value === this.section) return;
-    this.section = value;
+    if (value === this.look.section) return;
+    this.look.section = value;
     this.layout();
+  }
+
+  /** Color of the frame while it is not lit. */
+  get frameColor(): Readonly<IColor3Like> {
+    return this.look.frameColor;
+  }
+
+  set frameColor(value: Readonly<IColor3Like>) {
+    this.look.frameColor = copyColor(value);
+    this.paint();
+  }
+
+  /** Color of the line of light. */
+  get lineColor(): Readonly<IColor3Like> {
+    return this.look.lineColor;
+  }
+
+  set lineColor(value: Readonly<IColor3Like>) {
+    this.look.lineColor = copyColor(value);
+    this.paint();
   }
 
   /**
-   * How far the glow of the frame reaches from its line, in world units; 0
-   * for the bare line. Set it here rather than on `neon`: the portal makes
-   * room for the glow in the bounds of its frame.
+   * How far the glow reaches from the edges, in world units. Set it here
+   * rather than on `neon`: the portal makes room for the glow in the bounds of
+   * the mesh that draws it.
    */
   get glowSize(): number {
-    return this.neon.glowSize;
+    return this.look.glowSize;
   }
 
   set glowSize(value: number) {
-    this.neon.glowSize = value;
+    this.look.glowSize = Math.max(0, value);
+    this.paint();
     this.layout();
+  }
+
+  /** Brightness of the glow. */
+  get glowIntensity(): number {
+    return this.look.glowIntensity;
+  }
+
+  set glowIntensity(value: number) {
+    this.look.glowIntensity = Math.max(0, value);
+    this.paint();
+  }
+
+  /** Color of the glow. */
+  get glowColor(): Readonly<IColor3Like> {
+    return this.look.glowColor;
+  }
+
+  set glowColor(value: Readonly<IColor3Like>) {
+    this.look.glowColor = copyColor(value);
+    this.paint();
   }
 
   /** True when the portal is a window onto the scene of its display. */
@@ -266,7 +323,7 @@ export class Portal extends PhysicalDisplay {
 
   /** How far the light runs into the world behind a window. See `IPortalWorldGlowOptions.depth`. */
   get worldGlowDepth(): number {
-    return this.worldGlowOptions.depth ?? this.neon.glowSize * 2;
+    return this.worldGlowOptions.depth ?? this.look.glowSize * 2;
   }
 
   set worldGlowDepth(value: number) {
@@ -276,7 +333,7 @@ export class Portal extends PhysicalDisplay {
 
   /** Brightness of the light behind a window. See `IPortalWorldGlowOptions.intensity`. */
   get worldGlowIntensity(): number {
-    return this.worldGlowOptions.intensity ?? this.neon.glowIntensity * 0.7;
+    return this.worldGlowOptions.intensity ?? this.look.glowIntensity * 0.7;
   }
 
   set worldGlowIntensity(value: number) {
@@ -284,38 +341,7 @@ export class Portal extends PhysicalDisplay {
     this.paintWorldGlow();
   }
 
-  /** Brightness of the glow of the frame. */
-  get glowIntensity(): number {
-    return this.neon.glowIntensity;
-  }
-
-  set glowIntensity(value: number) {
-    this.neon.glowIntensity = value;
-    this.paintWorldGlow();
-  }
-
-  /** Color of the glow of the frame. */
-  get glowColor(): Readonly<IColor3Like> {
-    return this.neon.glowColor;
-  }
-
-  set glowColor(value: Readonly<IColor3Like>) {
-    this.neon.glowColor = value;
-    this.paintWorldGlow();
-  }
-
-  /** Color of the line of the frame. */
-  get lineColor(): Readonly<IColor3Like> {
-    return this.neon.lineColor;
-  }
-
-  set lineColor(value: Readonly<IColor3Like>) {
-    this.neon.lineColor = value;
-    this.lineMaterial.emissiveColor.set(value.r, value.g, value.b);
-    this.paintWorldGlow();
-  }
-
-  /** What the opening shows; null for an empty frame. The portal does not own its display. */
+  /** What the surface shows; null for an empty one. The portal does not own its display. */
   get display(): ITextureDisplay | null {
     return this._display;
   }
@@ -326,25 +352,23 @@ export class Portal extends PhysicalDisplay {
     if (previous && this.displayObserver) previous.onChangedObservable.remove(this.displayObserver);
     this.displayObserver = null;
     if (previous && this.windowOptions) previous.setWindow?.(null);
-    previous?.removeSurface?.(this.glowMesh);
-    previous?.removeSurface?.(this.tubeMesh);
+    for (const mesh of this.dressing()) previous?.removeSurface?.(mesh);
     this.disposeWorldGlow();
     this._display = value;
     if (!value) {
-      this.surface?.dispose();
-      this.surface = null;
+      this.shown?.dispose();
+      this.shown = null;
     } else {
-      if (this.surface) this.surface.display = value;
-      else this.surface = new DisplaySurface(this.screen, value, { ...this.surfaceOptions, aspect: this.aspect });
+      if (this.shown) this.shown.display = value;
+      else this.shown = new DisplaySurface(this.screen, value, { ...this.surfaceOptions, alwaysBlended: this.ribbon !== null, aspect: this.aspect });
       this.displayObserver = value.onChangedObservable.add((change) => {
         if (change.kind === "disposed") this.display = null;
         else if (change.kind === "resolution") this.takeResolution(value);
         // The display shows another scene: the light behind the opening moves there.
         else if (change.kind === "texture") this.buildWorldGlow(value);
       });
-      // The frame belongs to the portal as its screen does: a display does not show the portal it is shown in.
-      value.addSurface?.(this.glowMesh);
-      value.addSurface?.(this.tubeMesh);
+      // The frame belongs to the portal as its surface does: a display does not show the portal it is shown in.
+      for (const mesh of this.dressing()) value.addSurface?.(mesh);
       if (this.windowOptions) {
         value.setWindow?.(this, this.anchorIn(value));
         this.buildWorldGlow(value);
@@ -356,24 +380,24 @@ export class Portal extends PhysicalDisplay {
     this.updateScreen();
   }
 
-  /** Opacity of the image in the opening: 1 opaque, 0 invisible. */
+  /** Opacity of the image: 1 opaque, 0 invisible. */
   get opacity(): number {
     return this.surfaceOptions.opacity ?? 1;
   }
 
   set opacity(value: number) {
     this.surfaceOptions.opacity = Math.min(1, Math.max(0, value));
-    if (this.surface) this.surface.opacity = this.surfaceOptions.opacity;
+    if (this.shown) this.shown.opacity = this.surfaceOptions.opacity;
   }
 
-  /** Whether the image shows on the back of the portal too, mirrored. */
+  /** Whether the image shows on the back faces of the surface too: the back of a rectangle, the inside of a ring. */
   get doubleSided(): boolean {
     return this.surfaceOptions.doubleSided ?? false;
   }
 
   set doubleSided(value: boolean) {
     this.surfaceOptions.doubleSided = value;
-    if (this.surface) this.surface.doubleSided = value;
+    if (this.shown) this.shown.doubleSided = value;
   }
 
   get fit(): DisplayFit {
@@ -384,10 +408,10 @@ export class Portal extends PhysicalDisplay {
     // The image of a window is the opening itself.
     if (this.windowOptions) return;
     this.surfaceOptions.fit = value;
-    if (this.surface) this.surface.fit = value;
+    if (this.shown) this.shown.fit = value;
   }
 
-  /** See `IPortalOptions.useImageAlpha`; undefined when the portal follows what the texture of its display says. */
+  /** See `IDisplaySurfaceOptions.useImageAlpha`; undefined when the portal follows what the texture of its display says. */
   get useImageAlpha(): boolean | undefined {
     return this.surfaceOptions.useImageAlpha;
   }
@@ -395,7 +419,7 @@ export class Portal extends PhysicalDisplay {
   set useImageAlpha(value: boolean | undefined) {
     if (value === undefined) delete this.surfaceOptions.useImageAlpha;
     else this.surfaceOptions.useImageAlpha = value;
-    if (this.surface) this.surface.useImageAlpha = value;
+    if (this.shown) this.shown.useImageAlpha = value;
   }
 
   /** A color of the image to let through; null for none. */
@@ -406,17 +430,28 @@ export class Portal extends PhysicalDisplay {
   set chromaKey(value: Readonly<IChromaKey> | null) {
     if (value) this.surfaceOptions.chromaKey = value;
     else delete this.surfaceOptions.chromaKey;
-    if (this.surface) this.surface.chromaKey = value;
+    if (this.shown) this.shown.chromaKey = value;
   }
 
-  /** Releases the meshes and the materials of the portal. Its display is left as it is. */
+  /**
+   * Changes the size of the surface, in world units. A mesh of the
+   * application keeps its size: the application scales it itself.
+   */
+  override setDimension(width: number, height: number): void {
+    if (!this.surface.setDimension) return;
+    super.setDimension(width, height);
+  }
+
+  /**
+   * Releases what the portal built: its frame, its glow, and its surface when
+   * the portal built it. Its display is left as it is, and a mesh of the
+   * application gets its former material back.
+   */
   override dispose(): void {
     this.display = null;
-    this.glowMesh.material = null;
-    this.tubeMesh.material = null;
-    this.neon.dispose();
-    this.lineMaterial.dispose();
-    this.root.dispose();
+    this.setTube(false);
+    this.setRibbon(false);
+    this.surface.dispose();
     super.dispose();
   }
 
@@ -429,6 +464,7 @@ export class Portal extends PhysicalDisplay {
   }
 
   protected override onDimensionChanged(): void {
+    this.surface.setDimension?.(this.width, this.height);
     this.layout();
   }
 
@@ -437,29 +473,137 @@ export class Portal extends PhysicalDisplay {
     this.resize(display.resolution.width, display.resolution.height);
   }
 
-  private layout(): void {
-    const size = { width: this.width, height: this.height, section: this.section };
-    writeRectFrame(size, this.tube.positions, this.tube.uvs);
-    this.tubeMesh.updateVerticesData(VertexBuffer.PositionKind, this.tube.positions);
-    this.tubeMesh.updateVerticesData(VertexBuffer.UVKind, this.tube.uvs);
-    this.tubeMesh.refreshBoundingInfo();
+  /** The meshes the portal sets on the edges of its surface. */
+  private dressing(): Mesh[] {
+    const meshes: Mesh[] = [];
+    if (this.tube) meshes.push(this.tube.mesh);
+    if (this.ribbon) meshes.push(this.ribbon.mesh);
+    return meshes;
+  }
 
-    writeRectFrameHalo(size, this.halo.positions, this.halo.uvs);
-    this.glowMesh.updateVerticesData(VertexBuffer.PositionKind, this.halo.positions);
-    this.glowMesh.updateVerticesData(VertexBuffer.UVKind, this.halo.uvs);
-    this.neon.lineWidth = this.section;
-    // The shader spreads the glow from the centre line of the tube, beyond the vertices: the bounds are those of
-    // the tube plus what reaches past it, so that the glow is not culled early. New bounds know nothing of where
-    // the mesh stands unless they are given its world matrix: without it the glow would be culled, and sorted
-    // against the screen, as if it stood at the origin of the world.
-    const reach = Math.max(this.neon.glowSize - this.section / 2, 0);
-    const bounds = this.tubeMesh.getBoundingInfo();
-    this.root.computeWorldMatrix(true);
-    this.glowMesh.buildBoundingInfo(
-      bounds.minimum.subtractFromFloats(reach, reach, reach),
-      bounds.maximum.subtractFromFloats(-reach, -reach, -reach),
-      this.glowMesh.computeWorldMatrix(true),
-    );
+  /** Builds what the portal is asked to wear and is not there yet, and lets go of what it no longer wears. */
+  private dress(): void {
+    // The edges of a mesh of the application are looked for only when something is to stand on them.
+    const edged = (this.frameOn || this.lightOn || this.glowOn) && this.surface.outlines.length > 0;
+    this.setTube(edged && this.frameOn);
+    this.setRibbon(edged && (this.lightOn || this.glowOn));
+    // Drawn after the glow whatever its opacity: see the order of the meshes in `setRibbon`.
+    if (this.shown) this.shown.material.alwaysBlended = this.ribbon !== null;
+    this.paint();
+    this.layout();
+  }
+
+  private setTube(on: boolean): void {
+    const tube = this.tube;
+    if (on === (tube !== null)) return;
+    if (tube) {
+      this.tube = null;
+      this._display?.removeSurface?.(tube.mesh);
+      tube.mesh.dispose();
+      tube.material.dispose();
+      return;
+    }
+    const geometry = createFrame(this.surface.outlines, this.look.section);
+    const mesh = new Mesh(`${this.name}.frame`, this.scene, this.root);
+    // Positions, normals and texture coordinates are rewritten at each change of size.
+    mesh.setVerticesData(VertexBuffer.PositionKind, geometry.positions, true);
+    mesh.setVerticesData(VertexBuffer.NormalKind, geometry.normals, true);
+    mesh.setVerticesData(VertexBuffer.UVKind, geometry.uvs, true);
+    mesh.setIndices(geometry.indices);
+    const material = new StandardMaterial(`${this.name}.frame`, this.scene);
+    material.specularColor = new Color3(0.2, 0.2, 0.2);
+    mesh.material = material;
+    this.tube = { mesh, geometry, material };
+    this._display?.addSurface?.(mesh);
+  }
+
+  private setRibbon(on: boolean): void {
+    const ribbon = this.ribbon;
+    if (on === (ribbon !== null)) return;
+    const look = this.look;
+    if (ribbon) {
+      this.ribbon = null;
+      // What the application set on the material itself is kept for the next one.
+      look.minLineWidth = ribbon.material.minLineWidth;
+      look.glowFalloff = ribbon.material.glowFalloff;
+      look.cover = ribbon.material.cover;
+      look.flow = { ...ribbon.material.flow };
+      this._display?.removeSurface?.(ribbon.mesh);
+      ribbon.mesh.dispose();
+      ribbon.material.dispose();
+      return;
+    }
+    const geometry = createFrameHalo(this.surface.outlines, this.frameOn ? look.section : 0);
+    const mesh = new Mesh(`${this.name}.glow`, this.scene, this.root);
+    // What depends on the size of the surface is rewritten at each change of size.
+    mesh.setVerticesData(VertexBuffer.PositionKind, geometry.positions, true);
+    mesh.setVerticesData(VertexBuffer.NormalKind, geometry.axes, true);
+    mesh.setVerticesData(VertexBuffer.UVKind, geometry.uvs, true);
+    mesh.setVerticesData(VertexBuffer.UV2Kind, geometry.offsets, false);
+    mesh.setVerticesData(VertexBuffer.TangentKind, geometry.joints, true);
+    mesh.setIndices(geometry.indices);
+    mesh.isPickable = false;
+    const material = new NeonMaterial(`${this.name}.neon`, this.scene, {
+      minLineWidth: look.minLineWidth,
+      glowFalloff: look.glowFalloff,
+      cover: look.cover,
+      flow: look.flow,
+    });
+    mesh.material = material;
+    this.ribbon = { mesh, geometry, material };
+    // The glow and the surface are both blended and stand as far from the eye: they are drawn in the order
+    // the scene holds them. The glow comes first, so that the image is drawn over it and the glow shows
+    // around the surface only, or through an image that is see-through.
+    holdBefore(mesh, this.screen);
+    this._display?.addSurface?.(mesh);
+  }
+
+  /** Gives the materials of the frame and of the glow the colors and the light of the portal. */
+  private paint(): void {
+    const look = this.look;
+    const tube = this.tube;
+    if (tube) {
+      // Lit, the tube is a line of light and takes none from the scene. Else it is a solid as any other.
+      const body = this.lightOn ? BLACK : look.frameColor;
+      const light = this.lightOn ? look.lineColor : BLACK;
+      tube.material.disableLighting = this.lightOn;
+      tube.material.diffuseColor.set(body.r, body.g, body.b);
+      tube.material.emissiveColor.set(light.r, light.g, light.b);
+    }
+    const neon = this.ribbon?.material;
+    if (neon) {
+      neon.lit = this.lightOn;
+      neon.lineColor = look.lineColor;
+      neon.glowColor = look.glowColor;
+      neon.glowSize = this.glowOn ? look.glowSize : 0;
+      neon.glowIntensity = look.glowIntensity;
+    }
+    this.paintWorldGlow();
+  }
+
+  /** Writes the vertices of what stands on the edges of the surface, after a change of size. Nothing is rebuilt. */
+  private layout(): void {
+    const outlines = this.surface.outlines;
+    // With no tube the light and the glow stand on the edge of the surface itself.
+    const section = this.frameOn ? this.look.section : 0;
+    const tube = this.tube;
+    if (tube) {
+      writeFrame(outlines, section, tube.geometry.positions, tube.geometry.normals, tube.geometry.uvs);
+      tube.mesh.updateVerticesData(VertexBuffer.PositionKind, tube.geometry.positions);
+      tube.mesh.updateVerticesData(VertexBuffer.NormalKind, tube.geometry.normals);
+      tube.mesh.updateVerticesData(VertexBuffer.UVKind, tube.geometry.uvs);
+      tube.mesh.refreshBoundingInfo();
+    }
+    const ribbon = this.ribbon;
+    if (ribbon) {
+      writeFrameHalo(outlines, section, ribbon.geometry);
+      ribbon.mesh.updateVerticesData(VertexBuffer.PositionKind, ribbon.geometry.positions);
+      ribbon.mesh.updateVerticesData(VertexBuffer.NormalKind, ribbon.geometry.axes);
+      ribbon.mesh.updateVerticesData(VertexBuffer.UVKind, ribbon.geometry.uvs);
+      ribbon.mesh.updateVerticesData(VertexBuffer.TangentKind, ribbon.geometry.joints);
+      ribbon.material.lineWidth = section;
+      this.boundGlow(ribbon, section);
+    }
 
     const world = this.worldGlowState;
     if (world) {
@@ -469,13 +613,45 @@ export class Portal extends PhysicalDisplay {
       world.mesh.refreshBoundingInfo();
     }
 
-    this.screen.scaling.set(this.width, this.height, 1);
-    if (this.surface) this.surface.aspect = this.aspect;
+    if (this.shown) this.shown.aspect = this.aspect;
     this.updateScreen();
   }
 
+  /**
+   * Gives the mesh of the glow its bounds. The shader spreads the light from
+   * the centre line of the frame, beyond the vertices: the bounds make room
+   * for it, so that the glow is not culled early.
+   *
+   * They are centred on the very centre of the surface. Blended meshes are
+   * sorted by the distance of that centre to the eye: with the same one, the
+   * glow and the surface are drawn in the order the scene holds them, from
+   * every angle.
+   */
+  private boundGlow(ribbon: IRibbon, section: number): void {
+    const positions = ribbon.geometry.positions;
+    const reach = Math.max(this.glowOn ? this.look.glowSize : 0, section / 2);
+    const centre = this.screen.getBoundingInfo().boundingSphere.center;
+    const around = [centre.x, centre.y, centre.z];
+    const extend = [reach, reach, reach];
+    for (let i = 0; i < positions.length; i++) {
+      const axis = i % 3;
+      extend[axis] = Math.max(extend[axis] as number, Math.abs((positions[i] as number) - (around[axis] as number)) + reach);
+    }
+    // New bounds know nothing of where the mesh stands unless they are given its world matrix: without it the
+    // glow would be culled, and sorted against the surface, as if it stood at the origin of the world.
+    this.root.computeWorldMatrix(true);
+    const world = ribbon.mesh.computeWorldMatrix(true);
+    const [x, y, z] = extend as [number, number, number];
+    ribbon.mesh.buildBoundingInfo(new Vector3(centre.x - x, centre.y - y, centre.z - z), new Vector3(centre.x + x, centre.y + y, centre.z + z), world);
+    // Halfway between two corners is the centre to the last bit only when said so.
+    const bounds = ribbon.mesh.getBoundingInfo();
+    bounds.boundingSphere.center.copyFrom(centre);
+    bounds.update(world);
+  }
+
   private updateScreen(): void {
-    this.screen.setEnabled(this.surface !== null && this.width > 0 && this.height > 0);
+    // A surface the portal built is hidden while it shows nothing. A mesh of the application is left as it is.
+    if (this.surface.ownsMesh) this.screen.setEnabled(this.shown !== null && this.width > 0 && this.height > 0);
   }
 
   /**
@@ -499,6 +675,8 @@ export class Portal extends PhysicalDisplay {
     const options = this.windowOptions;
     const scene = display.texture.getScene();
     if (!options || options.glow === false || !display.setWindow || !scene) return;
+    // The glow of the frame carried on: a portal that does not glow has none, unless it is asked for.
+    if (!this.glowOn && !options.glow) return;
     const anchor = this.anchorIn(display);
     // Behind the opening: toward +z in a left-handed scene, toward -z in a right-handed one.
     const into = scene.useRightHandedSystem ? -1 : 1;
@@ -535,11 +713,11 @@ export class Portal extends PhysicalDisplay {
   private paintWorldGlow(): void {
     const world = this.worldGlowState;
     if (!world) return;
-    const glow = this.worldGlowOptions.color ?? this.neon.glowColor;
-    const line = this.neon.lineColor;
+    const glow = this.worldGlowOptions.color ?? this.look.glowColor;
+    const line = this.look.lineColor;
     const intensity = this.worldGlowIntensity;
     const falloff = Math.max(0.01, this.worldGlowOptions.falloff ?? 2);
-    const cover = this.neon.cover;
+    const cover = this.ribbon?.material.cover ?? this.look.cover;
     const byte = (value: number): number => Math.round(Math.min(1, Math.max(0, value)) * 255);
     for (let i = 0; i < WORLD_GLOW_STEPS; i++) {
       // 1 on the opening, 0 at the end of the walls.
@@ -565,6 +743,34 @@ export class Portal extends PhysicalDisplay {
   }
 }
 
+/** The colors and the sizes of what a portal wears, whether it wears it now or not. */
+interface IPortalLook {
+  section: number;
+  frameColor: IColor3Like;
+  lineColor: IColor3Like;
+  minLineWidth: number;
+  glowColor: IColor3Like;
+  glowSize: number;
+  glowIntensity: number;
+  glowFalloff: number;
+  cover: number;
+  flow: INeonFlow;
+}
+
+/** The tube of the frame. Its vertices are rewritten at each change of size. */
+interface ITube {
+  mesh: Mesh;
+  geometry: IFrameGeometry;
+  material: StandardMaterial;
+}
+
+/** The ribbons that draw the light and the glow. Their vertices are rewritten at each change of size. */
+interface IRibbon {
+  mesh: Mesh;
+  geometry: IFrameHaloGeometry;
+  material: NeonMaterial;
+}
+
 /** The light behind the opening of a window, and what draws it. */
 interface IWorldGlow {
   mesh: Mesh;
@@ -578,3 +784,24 @@ interface IWorldGlow {
 
 /** Colors along the depth of the walls. */
 const WORLD_GLOW_STEPS = 64;
+
+const BLACK: Readonly<IColor3Like> = { r: 0, g: 0, b: 0 };
+const FRAME_GRAY: Readonly<IColor3Like> = { r: 0.16, g: 0.17, b: 0.2 };
+
+const copyColor = (color: Readonly<IColor3Like>): IColor3Like => ({ r: color.r, g: color.g, b: color.b });
+
+const isMesh = (surface: AbstractMesh | IPortalSurfaceBuilder): surface is AbstractMesh => typeof (surface as Partial<AbstractMesh>).getScene === "function";
+
+/**
+ * Moves `first` before `second` in the list of the meshes of their scene.
+ * Blended meshes that stand as far from the eye are drawn in the order of
+ * that list, which Babylon.js keeps when a mesh leaves the scene.
+ */
+function holdBefore(first: AbstractMesh, second: AbstractMesh): void {
+  const meshes = first.getScene().meshes;
+  const from = meshes.indexOf(first);
+  const to = meshes.indexOf(second);
+  if (from < 0 || to < 0 || from < to) return;
+  meshes.splice(from, 1);
+  meshes.splice(to, 0, first);
+}
