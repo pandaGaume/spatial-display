@@ -288,14 +288,14 @@ async function main(): Promise<void> {
   }, 500);
 
   // With ?xr, the room can be entered in a headset: its viewer then has two eyes.
-  await offerHeadset(room, floor);
+  const xr = await offerHeadset(room, floor);
 
   // Only the room is rendered here.
   engine.runRenderLoop(() => room.render());
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, room, world, portal, curve, anchor, worldDisplay, roomDisplay, pictureDisplay, greenDisplay, show, Vector3 });
+  Object.assign(window, { engine, room, world, portal, curve, anchor, worldDisplay, roomDisplay, pictureDisplay, greenDisplay, show, xr, Vector3 });
 }
 
 void main();

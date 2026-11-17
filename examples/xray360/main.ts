@@ -329,13 +329,13 @@ async function main(): Promise<void> {
   }, 500);
 
   // With ?xr, the scene can be entered in a headset: its viewer then has two eyes.
-  await offerHeadset(scene, ground);
+  const xr = await offerHeadset(scene, ground);
 
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());
 
   // For the checks made from the console of the browser.
-  Object.assign(window, { engine, scene, camera, scanner, display, surfaces, ring, polygon, panel, sheet, bubble, knot, hull, inside, Vector3, HIDDEN_LAYER });
+  Object.assign(window, { engine, scene, camera, scanner, display, surfaces, ring, polygon, panel, sheet, bubble, knot, hull, inside, xr, Vector3, HIDDEN_LAYER });
 }
 
 void main();

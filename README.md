@@ -78,6 +78,10 @@ MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout e
 
 Put the address of the computer on its network in place of `192.168.1.20`. `MSYS_NO_PATHCONV=1` keeps Git Bash from reading the subject as a path; another shell does not need it. The firewall of the computer must let Node.js be reached from the network.
 
+A headset has no console to look at, so a page served that way tells the terminal of its server what it does, a line each time, marked `[headset]`: the state of the session, the errors and warnings, and every two seconds its cadence in images a second (`fps`), the longest time between two images (`worstMs`), the size of the frame, and the size and samples of the image of each display.
+
+In the headset, the second button of a controller, B or Y, leaves the scene. Images that come too slowly make the wearer of a headset sick: the page leaves by itself when it draws fewer than 45 a second for a few seconds, and says so in the terminal. `?xr=stay` keeps it in, to look at what is slow.
+
 ## Use
 
 ```ts

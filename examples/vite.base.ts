@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { UserConfig } from "vite";
+import type { Plugin, UserConfig } from "vite";
 
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
@@ -18,6 +18,31 @@ const headset = (): UserConfig["server"] => {
   return { host: true, https: { key: readFileSync(key), cert: readFileSync(cert) } };
 };
 
+/**
+ * Writes to the terminal what a page tells of the headset it runs in (see
+ * `xr.ts`): its cadence, the size of its images, what goes wrong. A headset
+ * has no console to look at.
+ */
+const headsetLog = (): Plugin => ({
+  name: "spatial-display:headset-log",
+  configureServer(server) {
+    server.middlewares.use("/__headset", (request, response) => {
+      let told = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk: string) => {
+        if (told.length < 4096) told += chunk;
+      });
+      request.on("end", () => {
+        // Anything on the network can write here: only what prints is let through to the terminal.
+        const text = told.slice(0, 4096).replace(/[^\x20-\x7e -￿]/g, "?");
+        console.log(`[headset ${new Date().toLocaleTimeString("en-GB")}] ${text}`);
+        response.statusCode = 204;
+        response.end();
+      });
+    });
+  },
+});
+
 /** What the examples share: they run on the sources of the packages, so no build is needed first. */
 export const exampleConfig = (port: number) => ({ mode }: { mode: string }): UserConfig => ({
   resolve: {
@@ -33,5 +58,6 @@ export const exampleConfig = (port: number) => ({ mode }: { mode: string }): Use
     // page asks for more files this way, and loads a little slower.
     exclude: ["@babylonjs/core"],
   },
+  plugins: mode === "headset" ? [headsetLog()] : [],
   server: { port, strictPort: true, ...(mode === "headset" ? headset() : {}) },
 });

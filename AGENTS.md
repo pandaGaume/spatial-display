@@ -270,7 +270,7 @@ npm run playground:bundle # examples/playground/out/spatial-display.js, the libr
 
 Run `npm run typecheck` and `npm test` before calling a change done.
 
-With `?xr` an example shows a button that enters its scene in a headset (`examples/xr.ts`). A headset asks for https: `npm run example:portal -- --mode headset` serves the example over https and to the whole network, with the certificate of `examples/.cert`, which is not tracked; `README.md` tells how to make it. The headset then opens `https://<address of the computer>:5183/?window&xr`.
+With `?xr` an example shows a button that enters its scene in a headset (`examples/xr.ts`). A headset asks for https: `npm run example:portal -- --mode headset` serves the example over https and to the whole network, with the certificate of `examples/.cert`, which is not tracked; `README.md` tells how to make it. The headset then opens `https://<address of the computer>:5183/?window&xr`. A page served that way writes what the headset does to the terminal of its server, in lines marked `[headset]`: state of the session, errors, and every two seconds the cadence and the size of the images. Read those lines instead of asking someone to wear the headset. B or Y leaves the scene, and the page leaves by itself under 45 images a second (`?xr=stay` keeps it in): slow images make the wearer sick.
 
 ### Layout
 
