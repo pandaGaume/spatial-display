@@ -464,21 +464,13 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
       const scene = this._camera.getScene();
       if (scene.activeCamera !== this._camera && !scene.activeCameras?.includes(this._camera)) this._camera.update();
     }
-    if (this.clock.refresh === "frame") {
-      const rate = active ? RenderTargetTexture.REFRESHRATE_RENDER_ONEVERYFRAME : RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
-      for (const texture of textures) if (texture.refreshRate !== rate) texture.refreshRate = rate;
-      return active;
-    }
-    // A texture is drawn once each time its counter is reset.
-    for (const texture of textures) {
-      if (texture.refreshRate !== RenderTargetTexture.REFRESHRATE_RENDER_ONCE) texture.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
-    }
     if (!active) {
       // Due as soon as a surface shows again.
       this.clock.invalidate();
       return false;
     }
     if (!this.clock.tick(deltaSeconds)) return false;
+    // A texture is drawn once each time its counter is reset, whatever the refresh: see `createTexture`.
     for (const texture of textures) texture.resetRefreshCounter();
     return true;
   }
@@ -705,6 +697,10 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     texture.wrapU = Texture.CLAMP_ADDRESSMODE;
     texture.wrapV = Texture.CLAMP_ADDRESSMODE;
     texture.activeCamera = camera;
+    // Drawn once now, then once each time `decide` resets its counter, and never by itself. A target that
+    // refreshed at every frame would be drawn each time Babylon.js meets it, and a frame may meet it more than
+    // once: the camera of a headset hands the targets of its scene to the camera of each eye, which draws them too.
+    texture.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
     // Without a predicate a render target draws the meshes the scene kept for its own camera.
     // A surface of this display stays out of its image: a texture cannot be sampled while it is drawn into.
     const include = options.include;

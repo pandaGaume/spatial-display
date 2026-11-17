@@ -358,6 +358,7 @@ A screen shows one image, whoever looks at it. A window and a lens follow their 
 - A surface shows each eye its own image. Babylon.js draws the two eyes one after the other, with a camera for each: the material of the surface is given the image of the eye that is being drawn. What stands behind an opening so has depth, as the rest of the scene.
 - Nothing is asked of the application. The second image is made when a viewer with two eyes is first met, and let go of when the viewer has one eye again.
 - It costs one more draw of the scene the display shows. `refresh`, `pauseWhenHidden` and `paused` hold for both images.
+- Each image is drawn once a frame at most, in a headset too. There Babylon.js hands the render targets of a scene to the camera of each eye, which draws them again: a display keeps its own count, and is not drawn a second time.
 
 ```ts
 // A viewer with two eyes, side by side on screen: the window draws the world for each.

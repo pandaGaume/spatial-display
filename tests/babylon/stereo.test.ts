@@ -40,6 +40,17 @@ const frame = (engine: NullEngine, scene: Scene): void => {
   engine.endFrame();
 };
 
+/**
+ * What the camera of a headset does at every frame (`WebXRCamera` of Babylon.js): it hands the targets of its
+ * scene to the camera of each eye, which then draws them too.
+ */
+const handTargetsToEyes = (camera: Camera): void => {
+  const targets = camera.getScene().customRenderTargets;
+  for (const eye of camera.rigCameras) {
+    for (const target of targets) if (!eye.customRenderTargets.includes(target)) eye.customRenderTargets.push(target);
+  }
+};
+
 /** Where a point of the world lands in the image of a camera, from -1 to 1 on each axis. */
 const inImage = (camera: Camera, x: number, y: number, z: number): number[] => {
   const p = Vector3.TransformCoordinates(new Vector3(x, y, z), camera.getViewMatrix(true).multiply(camera.getProjectionMatrix()));
@@ -174,5 +185,34 @@ describe("a viewer who has two eyes", () => {
     attachDisplay(CreateSphere("ball", { diameter: 1 }, host.scene), screen);
     frame(engine, host.scene);
     expect(screen.rightTexture).toBeNull();
+  });
+
+  it("has each image drawn once a frame, though a headset hands the targets of its scene to each eye", () => {
+    const engine = makeEngine();
+    const host = makeHost(engine);
+    // One scene, as an x-ray: the display shows the scene of its viewer, so its images are targets of that scene.
+    const scanner = new FreeCamera("scanner", Vector3.Zero(), host.scene, false);
+    const lens = new CameraDisplay({ camera: scanner, name: "lens" });
+    lens.setLens({ scene: host.scene });
+    attachDisplay(CreateSphere("bubble", { diameter: 1 }, host.scene), lens);
+    const pane = new CameraDisplay({ camera: scanner, name: "pane" });
+    new PortalBuilder("pane", host.scene).withSurface(new RectSurfaceBuilder({ width: 2, height: 1, display: pane, window: true })).build();
+    const screen = new CameraDisplay({ camera: scanner, name: "screen" });
+    attachDisplay(CreateSphere("ball", { diameter: 1 }, host.scene), screen);
+    frame(engine, host.scene);
+
+    const draws = new Map<string, number>();
+    for (const display of [lens, pane, screen]) {
+      for (const texture of [display.texture, display.rightTexture]) {
+        if (!texture) continue;
+        draws.set(texture.name, 0);
+        texture.onAfterRenderObservable.add(() => draws.set(texture.name, (draws.get(texture.name) ?? 0) + 1));
+      }
+    }
+    for (let i = 0; i < 3; i++) {
+      handTargetsToEyes(host.camera);
+      frame(engine, host.scene);
+    }
+    expect(Object.fromEntries(draws)).toEqual({ lens: 3, "lens.right": 3, pane: 3, "pane.right": 3, screen: 3 });
   });
 });

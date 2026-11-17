@@ -325,6 +325,7 @@ scripts/bump.mjs        sets the next version of both packages, before a release
 - The glow of a portal is drawn before its screen because both have the very same bounding centre and the glow comes first in `scene.meshes`. A change to the bounds of either, or to the order they are made in, must keep both.
 - The glow of a curve is looked at from the side too: where a rim turns toward the eye its sides are seen end on, which is where a mitre goes wrong.
 - A change to how a window or a lens follows its viewer is looked at with `?stereo` too: the two halves of the screen are the two eyes, and what stands behind an opening must shift from one to the other.
+- The render target of a display never refreshes by itself: it keeps `REFRESHRATE_RENDER_ONCE`, and `CameraDisplay` resets its counter at each frame the image is due. In a headset Babylon.js hands the targets of a scene to the camera of each eye: a target that refreshed at every frame would be drawn three times. A test in `tests/babylon/stereo.test.ts` counts the draws.
 - When bounds of a mesh are rebuilt with `buildBoundingInfo`, pass the world matrix of the mesh. Without it the mesh is culled and sorted as if it stood at the origin.
 - The examples serve Babylon.js unbundled (`optimizeDeps.exclude`). Do not remove that.
 
