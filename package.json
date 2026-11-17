@@ -18,6 +18,7 @@
     "example:portal": "vite examples/portal",
     "example:xray": "vite examples/xray",
     "example:xray360": "vite examples/xray360",
+    "example:sphere": "vite examples/sphere",
     "playground:bundle": "node examples/playground/bundle.mjs",
     "bump:patch": "node scripts/bump.mjs patch",
     "bump:minor": "node scripts/bump.mjs minor",

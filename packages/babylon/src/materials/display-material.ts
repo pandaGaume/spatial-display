@@ -56,6 +56,8 @@ const NO_PROJECTOR = Matrix.Identity();
 export class DisplayMaterial extends ShaderMaterial {
   private readonly uv = new Vector4(1, 1, 0, 0);
   private readonly borderColor = new Color4(0, 0, 0, 1);
+  private readonly backTint = new Color4(0, 0, 0, 1);
+  private hasBack = false;
   private readonly alphaFlags = new Vector2(0, 0);
   private readonly keyColor = new Color3(0, 1, 0);
   /** A valid range even while the key is off: a shader must not divide by a band of zero width. */
@@ -74,7 +76,7 @@ export class DisplayMaterial extends ShaderMaterial {
       webgpu ? { vertexSource: DISPLAY_VERTEX_WGSL, fragmentSource: DISPLAY_FRAGMENT_WGSL } : { vertexSource: DISPLAY_VERTEX_GLSL, fragmentSource: DISPLAY_FRAGMENT_GLSL },
       {
         attributes: ["position", "uv"],
-        uniforms: ["world", "worldViewProjection", "projector", "projected", "uvTransform", "opacity", "imageAlpha", "border", "keyColor", "keyRange", "keyMask"],
+        uniforms: ["world", "worldViewProjection", "projector", "projected", "uvTransform", "opacity", "imageAlpha", "border", "back", "backPlain", "keyColor", "keyRange", "keyMask"],
         samplers: ["displayTexture"],
         shaderLanguage: webgpu ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
       },
@@ -84,6 +86,8 @@ export class DisplayMaterial extends ShaderMaterial {
     this.alphaMode = Constants.ALPHA_PREMULTIPLIED_PORTERDUFF;
     this.setVector4("uvTransform", this.uv);
     this.setColor4("border", this.borderColor);
+    this.setColor4("back", this.backTint);
+    this.setFloat("backPlain", 0);
     this.setFloat("opacity", 1);
     this.setVector2("imageAlpha", this.alphaFlags);
     this.setColor3("keyColor", this.keyColor);
@@ -205,6 +209,24 @@ export class DisplayMaterial extends ShaderMaterial {
     this.refreshDepth();
   }
 
+  /**
+   * Color of the faces turned away from the eye, which then show no image:
+   * the plain back of a screen. null (default) for back faces that show the
+   * image as the front ones do. It tells nothing of whether the back faces
+   * are drawn: that is the culling of the material.
+   */
+  get backColor(): Readonly<IColor4Like> | null {
+    return this.hasBack ? this.backTint : null;
+  }
+
+  set backColor(value: Readonly<IColor4Like> | null) {
+    this.hasBack = value !== null;
+    if (value) this.backTint.set(value.r, value.g, value.b, value.a);
+    this.setColor4("back", this.backTint);
+    this.setFloat("backPlain", value ? 1 : 0);
+    this.refreshDepth();
+  }
+
   /** Where the image stands in the texture space of the mesh. */
   setUvTransform(transform: Readonly<IUvTransform>): void {
     this.uv.set(transform.uScale, transform.vScale, transform.uOffset, transform.vOffset);
@@ -213,7 +235,7 @@ export class DisplayMaterial extends ShaderMaterial {
 
   /** True when nothing shows through the surface. */
   get opaque(): boolean {
-    return this._opacity >= 1 && this.alphaFlags.x === 0 && this._chromaKey === null && this.borderColor.a >= 1;
+    return this._opacity >= 1 && this.alphaFlags.x === 0 && this._chromaKey === null && this.borderColor.a >= 1 && (!this.hasBack || this.backTint.a >= 1);
   }
 
   override needAlphaBlending(): boolean {

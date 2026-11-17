@@ -27,6 +27,14 @@ export interface IDisplaySurfaceOptions {
    */
   doubleSided?: boolean;
   /**
+   * Color of the back faces of the mesh. They are then drawn plain, in that
+   * color, and show no image: the back of a flat screen, the inside of a
+   * ring, as a solid would have them. With an alpha under 1 the color tints
+   * what stands behind. It takes over `doubleSided`: a back is plain or shows
+   * the image, not both. Default: none.
+   */
+  backColor?: Readonly<IColor4Like>;
+  /**
    * Color of the surface where the image does not reach ("contain"). Default
    * opaque black, and nothing for a display that is a lens: its image reaches
    * the whole surface wherever its viewer sees it.
@@ -74,6 +82,7 @@ export class DisplaySurface {
   /** null: black, or nothing for a lens. */
   private readonly borderGiven: Readonly<IColor4Like> | null;
   private _display: ITextureDisplay;
+  private _doubleSided: boolean;
   private _fit: DisplayFit;
   private _aspect: number;
   private observer: Observer<IDisplayChange> | null = null;
@@ -92,7 +101,9 @@ export class DisplaySurface {
     this.imageAlpha = options.useImageAlpha;
     this.former = mesh.material;
     this.material = new DisplayMaterial(`${mesh.name}.display`, mesh.getScene());
-    this.doubleSided = options.doubleSided ?? false;
+    this._doubleSided = options.doubleSided ?? false;
+    this.material.backColor = options.backColor ?? null;
+    this.showFaces();
     this.material.opacity = options.opacity ?? 1;
     this.material.chromaKey = options.chromaKey ?? null;
     this.material.alwaysBlended = options.alwaysBlended ?? false;
@@ -117,14 +128,22 @@ export class DisplaySurface {
 
   /** See `IDisplaySurfaceOptions.doubleSided`. */
   get doubleSided(): boolean {
-    return !this.material.backFaceCulling;
+    return this._doubleSided;
   }
 
   set doubleSided(value: boolean) {
-    this.material.backFaceCulling = !value;
-    // The faces turned away from the eye are drawn first, then those turned toward it:
-    // through a see-through image, the far wall of a hollow mesh shows behind the near one.
-    this.material.separateCullingPass = value;
+    this._doubleSided = value;
+    this.showFaces();
+  }
+
+  /** See `IDisplaySurfaceOptions.backColor`; null for a surface whose back is not plain. */
+  get backColor(): Readonly<IColor4Like> | null {
+    return this.material.backColor;
+  }
+
+  set backColor(value: Readonly<IColor4Like> | null) {
+    this.material.backColor = value;
+    this.showFaces();
   }
 
   get opacity(): number {
@@ -180,6 +199,15 @@ export class DisplaySurface {
     this.unbind();
     if (this.mesh.material === this.material) this.mesh.material = this.former;
     this.material.dispose();
+  }
+
+  /** Draws the back faces when they have something to show: the image, or their own color. */
+  private showFaces(): void {
+    const back = this._doubleSided || this.material.backColor !== null;
+    this.material.backFaceCulling = !back;
+    // The faces turned away from the eye are drawn first, then those turned toward it:
+    // through a see-through image, the far wall of a hollow mesh shows behind the near one.
+    this.material.separateCullingPass = back;
   }
 
   private bind(display: ITextureDisplay): void {

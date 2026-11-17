@@ -20,6 +20,10 @@
 // lands once projected by `projector`, from world space to the image. That is
 // how a lens shows, on a surface of any shape, the part of the image of the
 // viewer that the surface covers on their screen.
+// back, backPlain: when `backPlain` is 1 the faces of the surface that are
+// turned away from the eye do not show the image: they are plain, of the color
+// `back`. The faces are told apart by the winding the engine draws with, the
+// same one it culls by.
 // keyRange: x threshold, y smoothness, z is 1 when the color key is on.
 // keyMask: xyz is 1 on the channels the key color is strongest in, w tells by
 // how much they stand above the others; w is 0 for a gray key.
@@ -53,6 +57,8 @@ uniform float opacity;
 uniform float projected;
 uniform vec2 imageAlpha;
 uniform vec4 border;
+uniform vec4 back;
+uniform float backPlain;
 uniform vec3 keyColor;
 uniform vec3 keyRange;
 uniform vec4 keyMask;
@@ -78,7 +84,9 @@ void main(void) {
   color = mix(color, body * keep * alpha, keyRange.z);
   alpha *= mix(1.0, keep, keyRange.z);
   vec4 shown = mix(vec4(border.rgb * border.a, border.a), vec4(color, alpha), within);
-  gl_FragColor = shown * opacity;
+  // A face turned away from the eye, on a surface whose back is plain.
+  float plain = backPlain * (gl_FrontFacing ? 0.0 : 1.0);
+  gl_FragColor = mix(shown, vec4(back.rgb * back.a, back.a), plain) * opacity;
 }`;
 
 export const DISPLAY_VERTEX_WGSL = `attribute position: vec3f;
@@ -104,6 +112,8 @@ uniform opacity: f32;
 uniform projected: f32;
 uniform imageAlpha: vec2f;
 uniform border: vec4f;
+uniform back: vec4f;
+uniform backPlain: f32;
 uniform keyColor: vec3f;
 uniform keyRange: vec3f;
 uniform keyMask: vec4f;
@@ -129,7 +139,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
   color = mix(color, body * keep * alpha, uniforms.keyRange.z);
   alpha = alpha * mix(1.0, keep, uniforms.keyRange.z);
   let shown: vec4f = mix(vec4f(uniforms.border.rgb * uniforms.border.a, uniforms.border.a), vec4f(color, alpha), within);
-  fragmentOutputs.color = shown * uniforms.opacity;
+  let plain: f32 = uniforms.backPlain * select(1.0, 0.0, input.frontFacing);
+  fragmentOutputs.color = mix(shown, vec4f(uniforms.back.rgb * uniforms.back.a, uniforms.back.a), plain) * uniforms.opacity;
 }`;
 
 // ---------------------------------------------------------------------------

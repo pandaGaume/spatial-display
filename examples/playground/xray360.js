@@ -22,6 +22,9 @@ import { attachDisplay, CameraDisplay, CylinderSurfaceBuilder, MeshSurfaceBuilde
 const HIDDEN_LAYER = 0x20000000;
 const EVERYDAY_LAYERS = 0x0fffffff;
 
+/** The color of the back of a surface, when it is plain. */
+const PLAIN_BACK = { r: 0.02, g: 0.05, b: 0.09, a: 1 };
+
 /** The corners of the polygon before it is bent: eight of them, one set back in a notch. x to the right, y upward. */
 const CORNERS = [
   [0.78, -0.1],
@@ -280,6 +283,10 @@ export const createScene = function (engine, canvas) {
   // With its back face, a surface also shows from behind: the far half of the ring, seen over the near one.
   check("Back face", true, (value) => {
     for (const surface of surfaces) surface.doubleSided = value;
+  });
+  // Or its back is plain: the inside of the ring is then a wall of that color, which shows no image.
+  check("Plain back", false, (value) => {
+    for (const surface of surfaces) surface.backColor = value ? PLAIN_BACK : null;
   });
   check("See hidden parts", true, (value) => (scanner.layerMask = value ? EVERYDAY_LAYERS | HIDDEN_LAYER : EVERYDAY_LAYERS));
   check("See the hull", true, (value) => (hullShown = value));

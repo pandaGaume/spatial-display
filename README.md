@@ -50,7 +50,11 @@ npm run example:xray
 npm run example:xray360
 ```
 
-The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185; add `?polygon` or `?sphere` to start with another surface than the ring. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
+```bash
+npm run example:sphere
+```
+
+The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185; add `?polygon` or `?sphere` to start with another surface than the ring. The sphere example opens on http://localhost:5186. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
 
 ## Use
 
@@ -115,6 +119,8 @@ The image is the one of a screen: it does not depend on who looks at it, so one 
 
 The image shows on the front faces of the mesh. With `doubleSided`, an option of the surface and a property that can change at any time (`surface.doubleSided`, `portal.doubleSided`), it shows on the back faces too: on the back of a flat mesh, where it reads mirrored, and on the inside of a hollow one. The faces turned away from the eye are then drawn first, so through a see-through image the far wall of a cylinder shows behind the near one.
 
+With `backColor`, the back faces are plain instead: they are drawn in that color and show no image, as the back of a real screen, or the inside of a drum. It takes over `doubleSided`, and can change at any time too: `surface.backColor`, `portal.backColor`, null to take it off.
+
 ## Transparency
 
 What stands behind a surface shows through it by `1 - opacity * alpha of the pixel`:
@@ -160,7 +166,7 @@ Nothing is worn unless asked: with a surface alone, a portal is a mesh that show
 
 ### The surface
 
-A surface is what shows the image, and gives the lines the frame runs along. Each builder takes the display (`display`) and the options of `attachDisplay` (`opacity`, `fit`, `doubleSided`, `border`, `useImageAlpha`, `chromaKey`), plus `pixelsPerUnit`.
+A surface is what shows the image, and gives the lines the frame runs along. Each builder takes the display (`display`) and the options of `attachDisplay` (`opacity`, `fit`, `doubleSided`, `backColor`, `border`, `useImageAlpha`, `chromaKey`), plus `pixelsPerUnit`.
 
 A flat rectangle. The frame goes around it; it is the one surface that can be a window (see the window mode below):
 
@@ -307,6 +313,20 @@ Any mesh that has texture coordinates will do. The example ([in the Playground](
 - Nothing is cut in front of a surface, nor behind it: the image holds whatever the copy draws along the line of sight. Choose it with the layers of the camera given and with `include`.
 - A lens can show another scene: `display.setLens({ scene, root }, anchor)` places the copy in the scene of the display, at the place the viewer has against `root`, taken from `anchor`. The two scenes must have the same handedness.
 
+The sphere example uses that to take the viewer into another world. From outside, its sphere is a plain object of the room. Inside, its wall is the surface of a lens onto another scene, `root` being the centre of the sphere and `anchor` a node of the other world:
+
+```ts
+const display = new CameraDisplay({ camera: world.activeCamera!, drive: "display" });
+display.setLens({ scene: room, root: sphere }, anchor);
+
+// The inside of the sphere: a mesh whose front faces look inward. From outside it is not drawn.
+const inside = CreateSphere("inside", { diameter: 2.6, sideOrientation: Mesh.BACKSIDE }, room);
+inside.parent = sphere;
+attachDisplay(inside, display);
+```
+
+A viewer who steps in is carried to the centre and sees the other world all around, as if they stood at the anchor, and looks about as they would there. They have not left the room: a key that moves takes them back out. The display is paused (`display.paused`) while the viewer is far from the sphere, so the other scene is rendered only when it can be seen.
+
 ## WebGL and WebGPU
 
 The two materials are written in GLSL and in WGSL, and pick their language from the engine: WebGPU does not have to translate GLSL. The two versions of each shader live side by side in `packages/babylon/src/materials/shaders.ts`.
@@ -341,6 +361,7 @@ The second command saves a new revision of the snippet `816LOC` and prints its a
 | `npm run example:portal` | the portal example, served by Vite from the sources: a flat portal, a bent screen |
 | `npm run example:xray` | the x-ray example: a window onto its own scene, a wall, a walker and its skeleton |
 | `npm run example:xray360` | the x-ray 360 example: a lens on a ring, on a polygon that is not flat, on a sphere |
+| `npm run example:sphere` | the sphere example: a lens onto another scene, all around a viewer who steps into a sphere |
 | `npm run playground:bundle` | the library as one module for the Babylon.js Playground, in `examples/playground/out` |
 | `npm run bump:patch`, `bump:minor`, `bump:major` | the next version of both packages, before a release |
 
@@ -371,7 +392,7 @@ Each package is published with its own `README.md` and a copy of the license; `n
 
 ## State and limits
 
-The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. The walker of the x-ray example and its skeleton were looked at on WebGL2 in a left-handed scene and on WebGPU in a right-handed one. The two snippets were run in the Playground itself, on WebGL2, with Babylon.js 9.37; the library built for the Playground was also run on WebGPU, in a page that loads Babylon.js as the Playground does. Nothing has run in a headset.
+The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. The walker of the x-ray example and its skeleton were looked at on WebGL2 in a left-handed scene and on WebGPU in a right-handed one. So were the plain back of a surface, on the ring of the x-ray 360 example, and the sphere example, walked into and out of. The two snippets were run in the Playground itself, on WebGL2, with Babylon.js 9.37; the library built for the Playground was also run on WebGPU, in a page that loads Babylon.js as the Playground does. Nothing has run in a headset.
 
 The examples serve Babylon.js unbundled (`optimizeDeps.exclude` in their Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
 

@@ -276,6 +276,39 @@ describe("Portal", () => {
     expect(display.texture.renderListPredicate(frameOf(portal))).toBe(true);
   });
 
+  it("gives its back faces a plain color instead of the image, when asked", () => {
+    const { scene, camera } = makeScene();
+    const display = new CameraDisplay({ camera });
+    const portal = gate(scene, { width: 1, height: 1, display, backColor: { r: 0, g: 0.5, b: 0.25, a: 1 } });
+    const material = portal.screen.material as DisplayMaterial;
+    // The back faces are drawn, first, and in their own color: the surface is not double sided for all that.
+    expect(portal.doubleSided).toBe(false);
+    expect(material.backFaceCulling).toBe(false);
+    expect(material.separateCullingPass).toBe(true);
+    expect(material.backColor).toMatchObject({ r: 0, g: 0.5, b: 0.25, a: 1 });
+    expect(material.opaque).toBe(true);
+    // A back that lets what stands behind it show through makes the surface a blended one.
+    portal.backColor = { r: 0, g: 0, b: 0, a: 0.5 };
+    expect(material.opaque).toBe(false);
+    expect(material.needAlphaBlending()).toBe(true);
+
+    // Without it the back faces are not drawn any more, unless they show the image.
+    portal.backColor = null;
+    expect(portal.backColor).toBeNull();
+    expect(material.backColor).toBeNull();
+    expect(material.backFaceCulling).toBe(true);
+    expect(material.separateCullingPass).toBe(false);
+    portal.doubleSided = true;
+    expect(material.backFaceCulling).toBe(false);
+    expect(material.backColor).toBeNull();
+
+    // The color is kept for the next display the portal shows.
+    portal.backColor = { r: 1, g: 1, b: 1, a: 1 };
+    portal.display = null;
+    portal.display = display;
+    expect((portal.screen.material as DisplayMaterial).backColor).toMatchObject({ r: 1, g: 1, b: 1, a: 1 });
+  });
+
   it("lets through the transparent pixels of its display, and a color when asked", () => {
     const { scene, camera } = makeScene();
     const display = new CameraDisplay({ camera });

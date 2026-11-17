@@ -3,7 +3,7 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js"
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture.js";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
 import { Color3 } from "@babylonjs/core/Maths/math.color.js";
-import type { IColor3Like } from "@babylonjs/core/Maths/math.like.js";
+import type { IColor3Like, IColor4Like } from "@babylonjs/core/Maths/math.like.js";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
@@ -184,6 +184,7 @@ export class Portal extends PhysicalDisplay {
       ...(shown.useImageAlpha !== undefined ? { useImageAlpha: shown.useImageAlpha } : {}),
       ...(shown.chromaKey ? { chromaKey: shown.chromaKey } : {}),
       ...(shown.border ? { border: shown.border } : {}),
+      ...(shown.backColor ? { backColor: shown.backColor } : {}),
     };
 
     this.dress();
@@ -398,6 +399,20 @@ export class Portal extends PhysicalDisplay {
   set doubleSided(value: boolean) {
     this.surfaceOptions.doubleSided = value;
     if (this.shown) this.shown.doubleSided = value;
+  }
+
+  /**
+   * Color of the back faces of the surface, which then show no image: the
+   * plain back of a screen, the inside of a ring. null for none.
+   */
+  get backColor(): Readonly<IColor4Like> | null {
+    return this.surfaceOptions.backColor ?? null;
+  }
+
+  set backColor(value: Readonly<IColor4Like> | null) {
+    if (value) this.surfaceOptions.backColor = value;
+    else delete this.surfaceOptions.backColor;
+    if (this.shown) this.shown.backColor = value;
   }
 
   get fit(): DisplayFit {

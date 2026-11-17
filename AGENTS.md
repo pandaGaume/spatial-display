@@ -30,6 +30,8 @@ In the Babylon.js Playground, or in any page that loads Babylon.js as the `BABYL
 | A screen with no frame, or a frame with no light, or a glow alone | leave out `withFrame()`, `withLight()` or `withGlow()`: none is there by default |
 | A bent screen, as a curved monitor | `CylinderSurfaceBuilder` with `arc` under 1, and `facing: "inside"` |
 | A ring around an object that shows it from every side | `display.setLens({ scene })` and a `CylinderSurfaceBuilder` |
+| The inside of that ring, or the back of a screen, as a plain wall instead of the image | `backColor` on the surface |
+| A place the viewer steps into, to see another world all around without leaving their scene | `display.setLens({ scene, root }, anchor)` on the inside of a sphere: see `examples/sphere` |
 | The image on a mesh the application already has, with a frame or a light on its edges | `PortalBuilder.withSurface(mesh)` or `MeshSurfaceBuilder` |
 | The image on such a mesh, and nothing more | `attachDisplay(mesh, display)` |
 | The image on a material of its own | `material.emissiveTexture = display.texture` |
@@ -177,7 +179,7 @@ if (portal.neon) portal.neon.flow.amplitude = 0.4;   // waves of light along the
 - **Frame, light, glow.** The frame is a tube along the edges of the surface: around a rectangle, along the two rims of a ring, all around a bent screen, along the open edges of a mesh. Lit, it is a line of light; not lit, a plain solid of `frameColor`. A light with no frame is a hairline on the edges. A surface with no edge, as a sphere, gets none of the three.
 - **Two sizes.** `portal.setDimension(width, height)` sizes the surface, in world units. `portal.resize(width, height)` sizes the image, in pixels, and resizes the display. `portal.width` and `portal.height` are in world units; the width of a wall is the length of its turn. Do not scale `portal.root`: it would thicken the frame. A portal on a mesh of the application ignores `setDimension`: scale the mesh.
 - **Placement.** Position, rotate and parent `portal.root`; for a mesh of the application, `portal.root` is that mesh. Facing the front of a flat portal, its local x reads to the right and y upward. The front looks toward -z in a left-handed scene and toward +z in a right-handed one. The middle of a wall bulges toward that side; with `facing: "inside"` it stands behind the node. The image shows on the front only, unless `doubleSided`.
-- **Faces.** A surface shows the image on the front faces of its mesh. `doubleSided`, an option of every surface, adds the back faces: the back of a flat mesh, where the image reads mirrored, and the inside of a hollow one. It can change at any time: `surface.doubleSided`, `portal.doubleSided`. The back faces are drawn first, in a pass of their own.
+- **Faces.** A surface shows the image on the front faces of its mesh. `doubleSided`, an option of every surface, adds the back faces: the back of a flat mesh, where the image reads mirrored, and the inside of a hollow one. It can change at any time: `surface.doubleSided`, `portal.doubleSided`. The back faces are drawn first, in a pass of their own. `backColor` gives them a plain color instead of the image, and takes over `doubleSided`: `surface.backColor`, `portal.backColor`, null to take it off.
 - **Ownership.** A portal does not own its display, and a display may feed several surfaces. Dispose of each: `portal.dispose()`, `surface.dispose()`, `display.dispose()`. A portal disposes of the surface it built, never of a mesh of the application, which gets its former material back. Disposing of a display empties the portals and surfaces that showed it. A display disposes of itself when its source scene is disposed.
 - **One engine, one scene.** The scene of the camera and the scene of the surface must share an engine. `attachDisplay` and the `camera` setter throw otherwise. A mesh given to a portal must belong to the scene the portal is built in.
 - **Who renders the source scene.** `drive: "app"` (default) expects the application to render it. `drive: "display"` renders it off the canvas, once per frame. Use `"display"` for a scene that exists only to be looked at through displays; using it for a scene the application also renders draws that scene twice, and logs a warning.
@@ -228,6 +230,7 @@ Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; d
 | Standard materials fail to compile, with HTML in the shader source | A Vite dev server bundled Babylon.js in several passes. Add `optimizeDeps: { exclude: ["@babylonjs/core"] }`, as `examples/vite.base.ts` does. |
 | A lens shows meshes that stand in front of its surface | By design: a lens cuts nothing. Keep those meshes out of the image with `include`, or with a layer the camera given does not have. |
 | A surface shows nothing from behind or from the inside, or the far wall of a hollow surface is missing | The image shows on the front faces of a mesh. Set `doubleSided`, at creation or later with `portal.doubleSided = true`. |
+| The inside of a ring should be a plain wall, not the image and not a hole | Set `backColor` on the surface, or `portal.backColor`: the back faces are drawn in that color. |
 | `setLens` throws | The anchor is not in the scene the display shows, or the two scenes differ in handedness or in engine. |
 | Wireframe lines of an x-ray are faint | They are one pixel wide in the image of the display. Lower its `resolution` toward the size of the screen on the canvas. |
 
@@ -259,6 +262,7 @@ npm test               # Vitest
 npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
 npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
 npm run example:xray360 # http://localhost:5185, add ?polygon, ?sphere, ?webgpu, ?rh
+npm run example:sphere # http://localhost:5186, add ?webgpu, ?rh
 npm run playground:bundle # examples/playground/out/spatial-display.js, the library for the Playground
 ```
 
@@ -289,7 +293,7 @@ packages/babylon/src    the Babylon.js adapter
   materials/            DisplayMaterial, NeonMaterial, their shaders
 packages/*/README.md    what npm shows for each package
 tests/core, tests/babylon
-examples/portal, examples/xray, examples/xray360, examples/vite.base.ts
+examples/portal, examples/xray, examples/xray360, examples/sphere, examples/vite.base.ts
 examples/playground     xray.js, xray360.js: two examples as snippets of the Babylon.js Playground
                         bundle.mjs: builds the library on the BABYLON global; publish.mjs: saves a snippet
 scripts/bump.mjs        sets the next version of both packages, before a release

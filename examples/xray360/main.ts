@@ -51,6 +51,9 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const HIDDEN_LAYER = 0x20000000;
 const EVERYDAY_LAYERS = 0x0fffffff;
 
+/** The color of the back of a surface, when it is plain. */
+const PLAIN_BACK = { r: 0.02, g: 0.05, b: 0.09, a: 1 };
+
 /** The corners of the polygon before it is bent: eight of them, one set back in a notch. x to the right, y upward. */
 const CORNERS: readonly (readonly [number, number])[] = [
   [0.78, -0.1],
@@ -285,11 +288,14 @@ async function main(): Promise<void> {
       surface.opacity = number("opacity");
       // With its back face, a surface also shows from behind: the far half of the ring, seen over the near one.
       surface.doubleSided = input("back").checked;
+      // Or its back is plain: the inside of the ring is then a wall of that color, which shows no image.
+      surface.backColor = input("plain").checked ? PLAIN_BACK : null;
     }
   };
   look();
   input("opacity").addEventListener("input", look);
   input("back").addEventListener("change", look);
+  input("plain").addEventListener("change", look);
 
   let time = 0;
   scene.onBeforeRenderObservable.add(() => {
