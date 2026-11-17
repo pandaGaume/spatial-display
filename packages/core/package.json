@@ -1,6 +1,6 @@
 {
   "name": "@spacexr/spatial-display-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Renderer-agnostic contract and math for spatial displays: display interfaces and base classes, geometry of the frame of a surface and of its halo, image fitting, refresh scheduling.",
   "license": "Apache-2.0",
   "author": "Guillaume Pelletier (SpaceXR)",
