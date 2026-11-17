@@ -342,19 +342,21 @@ The second command saves a new revision of the snippet `816LOC` and prints its a
 | `npm run example:xray` | the x-ray example: a window onto its own scene, a wall, a walker and its skeleton |
 | `npm run example:xray360` | the x-ray 360 example: a lens on a ring, on a polygon that is not flat, on a sphere |
 | `npm run playground:bundle` | the library as one module for the Babylon.js Playground, in `examples/playground/out` |
+| `npm run bump:patch`, `bump:minor`, `bump:major` | the next version of both packages, before a release |
 
 ## Releasing
 
 The core and the Babylon.js adapter are published to npm under the `@spacexr` organization, at the same version, by [.github/workflows/release.yaml](.github/workflows/release.yaml) when a tag `vX.Y.Z` is pushed. The workflow checks that the tag carries the version of every `packages/*/package.json`, builds, runs the type check and the tests, and publishes each package from its workspace.
 
 ```bash
-npm version 0.2.0 --workspaces --no-git-tag-version   # both packages
-# then set the same version in the peer range of babylon on the core
+npm run bump:minor      # 0.1.0 becomes 0.2.0; or bump:patch (0.1.1), bump:major (1.0.0)
 git commit -am "Release 0.2.0"
 git tag v0.2.0
 git push origin main
 git push origin v0.2.0
 ```
+
+`scripts/bump.mjs` writes the next version where it is told: in the manifest of each package, in the range the adapter asks of the core, in the lock file and in `AGENTS.md`. It commits nothing and tags nothing. `node scripts/bump.mjs 1.4.2` sets a given version, and `--dry-run` shows what would change.
 
 The workflow publishes through npm trusted publishing (OIDC), with no token. A package must exist on npm before a trusted publisher can be set on it, so the first version is published by hand, from the root, after `npm run build`:
 

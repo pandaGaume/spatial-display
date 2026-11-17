@@ -292,6 +292,7 @@ tests/core, tests/babylon
 examples/portal, examples/xray, examples/xray360, examples/vite.base.ts
 examples/playground     xray.js, xray360.js: two examples as snippets of the Babylon.js Playground
                         bundle.mjs: builds the library on the BABYLON global; publish.mjs: saves a snippet
+scripts/bump.mjs        sets the next version of both packages, before a release
 .github/workflows/release.yaml   publishes both packages when a tag vX.Y.Z is pushed
 ```
 
@@ -324,7 +325,7 @@ examples/playground     xray.js, xray360.js: two examples as snippets of the Bab
 
 ### Releasing
 
-The two packages carry the same version. `README.md` has the steps: set the version in both `packages/*/package.json` and in the peer range of the adapter on the core, commit, tag `vX.Y.Z` and push the tag; the workflow builds, checks, tests and publishes. Do not publish, tag or push unless asked.
+The two packages carry the same version. `README.md` has the steps: `npm run bump:patch`, `bump:minor` or `bump:major` sets the next version in both `packages/*/package.json`, in the peer range of the adapter on the core, in the lock file and in this file; then commit, tag `vX.Y.Z` and push the tag; the workflow builds, checks, tests and publishes. Do not bump, publish, tag or push unless asked.
 
 ### Git
 
