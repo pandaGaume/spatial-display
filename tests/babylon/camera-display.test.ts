@@ -109,10 +109,14 @@ describe("CameraDisplay", () => {
     expect(idleDraws.count).toBe(0);
   });
 
-  it("draws on demand when its refresh is manual", () => {
+  it("draws on demand when its refresh is manual", async () => {
     const engine = makeEngine();
     const world = makeScene(engine, "world");
     const display = new CameraDisplay({ camera: world.camera, refresh: "manual" });
+    // Babylon.js draws an image that is drawn once again at every frame for as long as a mesh it shows is not
+    // ready, so that the image does not miss it: the material of the box is still loading its shaders. The
+    // draws are counted from the moment the scene is ready.
+    await world.scene.whenReadyAsync();
     const draws = countDraws(display);
     for (let i = 0; i < 4; i++) frame(engine, world.scene);
     expect(draws.count).toBe(1);
