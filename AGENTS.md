@@ -17,6 +17,8 @@ Both are at version 0.1.0. Check that they are on npm before adding them to a ma
 
 There is nothing to call in the render loop. A display hooks itself to the engine and to the scenes it needs.
 
+In the Babylon.js Playground, or in any page that loads Babylon.js as the `BABYLON` global, do not import the packages by their names: a CDN would serve them with a Babylon.js of their own, and two of them do not work together. Build the library for that global (`npm run playground:bundle`) and add `examples/playground/out/spatial-display.js` to the snippet as a second file. Two snippets show it: [an x-ray all around an object](https://playground.babylonjs.com/#F9VTYN#0) and [an x-ray screen](https://playground.babylonjs.com/#816LOC#1).
+
 ### Pick by intent
 
 | The application wants | Use |
@@ -257,6 +259,7 @@ npm test               # Vitest
 npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
 npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
 npm run example:xray360 # http://localhost:5185, add ?polygon, ?sphere, ?webgpu, ?rh
+npm run playground:bundle # examples/playground/out/spatial-display.js, the library for the Playground
 ```
 
 Run `npm run typecheck` and `npm test` before calling a change done.
@@ -287,6 +290,8 @@ packages/babylon/src    the Babylon.js adapter
 packages/*/README.md    what npm shows for each package
 tests/core, tests/babylon
 examples/portal, examples/xray, examples/xray360, examples/vite.base.ts
+examples/playground     xray.js, xray360.js: two examples as snippets of the Babylon.js Playground
+                        bundle.mjs: builds the library on the BABYLON global; publish.mjs: saves a snippet
 .github/workflows/release.yaml   publishes both packages when a tag vX.Y.Z is pushed
 ```
 
@@ -311,6 +316,11 @@ examples/portal, examples/xray, examples/xray360, examples/vite.base.ts
 - The glow of a curve is looked at from the side too: where a rim turns toward the eye its sides are seen end on, which is where a mitre goes wrong.
 - When bounds of a mesh are rebuilt with `buildBoundingInfo`, pass the world matrix of the mesh. Without it the mesh is culled and sorted as if it stood at the origin.
 - The examples serve Babylon.js unbundled (`optimizeDeps.exclude`). Do not remove that.
+
+### Playground
+
+- `examples/playground/xray.js` and `xray360.js` follow `examples/xray/main.ts` and `examples/xray360/main.ts`: a change to one is carried to the other.
+- `publish.mjs` saves a snippet on the public server of the Playground, where it stays. Do not run it unless asked; when it is run, give it the id of the snippet, so that it saves a new revision, and put the address it prints in `README.md`, in `packages/babylon/README.md` and in this file.
 
 ### Releasing
 

@@ -6,6 +6,8 @@ Displays for Babylon.js scenes. A display shows an image as a texture: the view 
 
 Built on [`@spacexr/spatial-display-core`](https://www.npmjs.com/package/@spacexr/spatial-display-core). WebGL2 and WebGPU: the two materials carry their shaders in GLSL and in WGSL.
 
+Try it in the Babylon.js Playground: [an x-ray all around an object](https://playground.babylonjs.com/#F9VTYN#0), and [an x-ray screen that sees through a wall](https://playground.babylonjs.com/#816LOC#1).
+
 ## Install
 
 ```bash

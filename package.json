@@ -18,6 +18,7 @@
     "example:portal": "vite examples/portal",
     "example:xray": "vite examples/xray",
     "example:xray360": "vite examples/xray360",
+    "playground:bundle": "node examples/playground/bundle.mjs",
     "clean": "tsc -b --clean"
   },
   "devDependencies": {

@@ -7,6 +7,15 @@ Displays for 3D scenes. A display shows an image, such as the view of a camera o
 | `@spacexr/spatial-display-core` | display interfaces, the `Display` and `PhysicalDisplay` base classes, geometry of the frame of a surface and of its halo, of the wall of a cylinder, the open edges of a mesh, image fitting, refresh scheduling. No dependencies, no rendering library. |
 | `@spacexr/spatial-display-babylon` | Babylon.js: `CameraDisplay`, `TextureDisplay`, `attachDisplay`, `Portal`, `PortalBuilder` and the surfaces a portal is built on, and the materials of the screen and of the neon. Peer dependency on `@babylonjs/core` 9. |
 
+## Try it
+
+Two of the examples run in the Babylon.js Playground, with nothing to install:
+
+- [An x-ray all around an object](https://playground.babylonjs.com/#F9VTYN#0): a ring whose wall shows the machine it surrounds as a wireframe, from every side, with the parts inside its hull. The same lens on a polygon that is not flat, and on a sphere.
+- [An x-ray screen](https://playground.babylonjs.com/#816LOC#1): a window onto its own scene, which sees through a wall of bricks and shows the skeleton of a figure that walks behind it.
+
+Each snippet holds two files: the code of the example, and the library as it is built for the Playground. See [Playground](#playground) below.
+
 ## Install
 
 ```bash
@@ -261,6 +270,8 @@ const portal = new PortalBuilder("xray", scene)
 - What the scene sets for all its cameras is shared by the two views: fog, environment, image processing. A light can be kept to some layers (`includeOnlyWithLayerMask`).
 - An object seen both around the screen and in it is drawn twice, once for each view.
 
+The x-ray example ([in the Playground](https://playground.babylonjs.com/#816LOC#1)) has a figure that walks around a wall. Its bones are meshes of the hidden layer, carried by the same joints as its body: the camera of the application draws the body, and the screen draws the bones plain and bright, with the body as a faint outline around them, since `overrideMaterial` picks a material for each mesh. The figure so shows as a skeleton when it passes behind the screen, and still does behind the wall, where the eye has lost it.
+
 ## Lens mode: an x-ray all around
 
 A window is flat: its camera starts drawing at the plane of its opening. A lens has no such plane, so its surface can have any shape. The display draws what the viewer sees, the way the display draws it, and a surface shows the part of that image it covers on screen:
@@ -285,7 +296,7 @@ const ring = new PortalBuilder("ring", scene)
 attachDisplay(bubble, display);
 ```
 
-Any mesh that has texture coordinates will do. The example has three: the ring, a portal on the wall of a cylinder; a polygon made of its own vertices, bent and twisted, that circles the machine, which a portal takes as it is and whose edge it lights; and a sphere that closes on a part of the machine.
+Any mesh that has texture coordinates will do. The example ([in the Playground](https://playground.babylonjs.com/#F9VTYN#0)) has three: the ring, a portal on the wall of a cylinder; a polygon made of its own vertices, bent and twisted, that circles the machine, which a portal takes as it is and whose edge it lights; and a sphere that closes on a part of the machine.
 
 - The display draws with a camera of its own, a copy of the one of the viewer: same place, same direction, same projection. The copy is made after Babylon.js has updated the camera of the viewer, in the same frame. The camera given to the display lends its scene and its layer mask, as for a window, and is not moved.
 - The image takes the size of the canvas, so a surface is as sharp as the rest of the screen; `scale` in the lens asks for less, or for more. `resize()` does not hold.
@@ -298,6 +309,26 @@ Any mesh that has texture coordinates will do. The example has three: the ring, 
 
 The two materials are written in GLSL and in WGSL, and pick their language from the engine: WebGPU does not have to translate GLSL. The two versions of each shader live side by side in `packages/babylon/src/materials/shaders.ts`.
 
+## Playground
+
+The Playground holds Babylon.js as the `BABYLON` global. A package imported there by its name comes from a CDN with a Babylon.js of its own, and two of them do not work together. `examples/playground/bundle.mjs` therefore builds the library as one module that reads Babylon.js from that global. A snippet holds it as a second file, `spatial-display.js`, next to the code of the example, which imports it:
+
+```js
+import { CameraDisplay, PortalBuilder, RectSurfaceBuilder } from "./spatial-display";
+```
+
+`examples/playground/xray.js` and `xray360.js` are the two examples as their snippets hold them: the code of `examples/xray` and of `examples/xray360`, written for the Playground, with its `BABYLON` global and its interface. To save one again after a change:
+
+```bash
+npm run playground:bundle
+```
+
+```bash
+node examples/playground/publish.mjs xray 816LOC
+```
+
+The second command saves a new revision of the snippet `816LOC` and prints its address; `xray360` goes with `F9VTYN`, and without an id a new snippet is made. A snippet is public, and stays: the links of this file name the revision they show.
+
 ## Scripts
 
 | Command | |
@@ -306,8 +337,9 @@ The two materials are written in GLSL and in WGSL, and pick their language from 
 | `npm run typecheck` | packages plus tests and examples |
 | `npm test` | Vitest, with the null engine of Babylon.js |
 | `npm run example:portal` | the portal example, served by Vite from the sources: a flat portal, a bent screen |
-| `npm run example:xray` | the x-ray example: a window onto its own scene |
+| `npm run example:xray` | the x-ray example: a window onto its own scene, a wall, a walker and its skeleton |
 | `npm run example:xray360` | the x-ray 360 example: a lens on a ring, on a polygon that is not flat, on a sphere |
+| `npm run playground:bundle` | the library as one module for the Babylon.js Playground, in `examples/playground/out` |
 
 ## Releasing
 
@@ -335,7 +367,7 @@ Each package is published with its own `README.md` and a copy of the license; `n
 
 ## State and limits
 
-The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. Nothing has run in a headset.
+The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. The walker of the x-ray example and its skeleton were looked at on WebGL2 in a left-handed scene and on WebGPU in a right-handed one. The two snippets were run in the Playground itself, on WebGL2, with Babylon.js 9.37; the library built for the Playground was also run on WebGPU, in a page that loads Babylon.js as the Playground does. Nothing has run in a headset.
 
 The examples serve Babylon.js unbundled (`optimizeDeps.exclude` in their Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
 
