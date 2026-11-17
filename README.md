@@ -14,6 +14,8 @@ Two of the examples run in the Babylon.js Playground, with nothing to install:
 - [An x-ray all around an object](https://playground.babylonjs.com/#F9VTYN#0): a ring whose wall shows the machine it surrounds as a wireframe, from every side, with the parts inside its hull. The same lens on a polygon that is not flat, and on a sphere.
 - [An x-ray screen](https://playground.babylonjs.com/#816LOC#1): a window onto its own scene, which sees through a wall of bricks and shows the skeleton of a figure that walks behind it.
 
+[![The x-ray screen: a figure that walks behind it shows as a skeleton, in front of the pipes hidden in a wall of bricks](docs/images/xray.png)](https://playground.babylonjs.com/#816LOC#1)
+
 Each snippet holds two files: the code of the example, and the library as it is built for the Playground. See [Playground](#playground) below.
 
 ## Install
