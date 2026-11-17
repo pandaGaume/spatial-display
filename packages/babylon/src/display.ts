@@ -95,6 +95,14 @@ export interface ITextureDisplay extends IDisplay {
    */
   readonly imageTransform?: Matrix | null;
   /**
+   * The image of the right eye of a viewer who has two, as in a headset;
+   * `texture` is then the image of their left eye. null or left out: one
+   * image serves both eyes. A surface shows each eye its own image.
+   */
+  readonly rightTexture?: BaseTexture | null;
+  /** How a surface reads `rightTexture`, as `imageTransform` tells for `texture`. */
+  readonly rightImageTransform?: Matrix | null;
+  /**
    * Tells the display that `mesh` shows it. A display uses that to stop
    * drawing while none of its surfaces is on screen, and to keep a surface out
    * of its own image.

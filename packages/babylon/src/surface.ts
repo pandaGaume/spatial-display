@@ -215,6 +215,7 @@ export class DisplaySurface {
     this.observer = display.onChangedObservable.add((change) => {
       if (change.kind === "texture") {
         this.material.image = display.texture;
+        this.updateEyes();
         this.updateAlpha();
       } else if (change.kind === "resolution" || change.kind === "mapping") this.update();
       else if (change.kind === "alpha") this.updateAlpha();
@@ -238,7 +239,14 @@ export class DisplaySurface {
     this.material.useImageAlpha = this.imageAlpha ?? display.texture.hasAlpha;
   }
 
+  /** A display that draws an image for each eye of its viewer tells which one the right eye reads, and how. */
+  private updateEyes(): void {
+    this.material.rightImage = this._display.rightTexture ?? null;
+    this.material.rightProjector = this._display.rightImageTransform ?? null;
+  }
+
   private update(): void {
+    this.updateEyes();
     // A lens tells how its image is read: where each point of the surface lands on the screen of the viewer.
     const projector = this._display.imageTransform ?? null;
     this.material.projector = projector;

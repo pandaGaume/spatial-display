@@ -19,11 +19,17 @@
  * No mesh is copied: a mesh is drawn solid by the camera of the application
  * and as a wireframe by the lens, from the same vertices.
  *
+ * With ?stereo the viewer has two eyes, drawn side by side: the lens then
+ * draws an image for each, and what shows in a surface has depth.
+ * ?stereo=0.3 sets the distance between the eyes.
+ *
  * URL: ?polygon or ?sphere to start with that surface, ?webgpu for the
- * WebGPU engine, ?rh for a right-handed scene.
+ * WebGPU engine, ?rh for a right-handed scene, ?stereo for a viewer with
+ * two eyes, ?xr for a button that enters the scene in a headset.
  */
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
+import { StereoscopicArcRotateCamera } from "@babylonjs/core/Cameras/Stereoscopic/stereoscopicArcRotateCamera.js";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight.js";
@@ -42,9 +48,12 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { attachDisplay, CameraDisplay, CylinderSurfaceBuilder, MeshSurfaceBuilder, PortalBuilder } from "@spacexr/spatial-display-babylon";
+import { offerHeadset } from "../xr.js";
 
 const params = new URLSearchParams(location.search);
 const rightHanded = params.has("rh");
+/** Distance between the two eyes of the viewer; null for a viewer with one eye. */
+const eyesApart = params.has("stereo") ? Number(params.get("stereo")) || 0.064 : null;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 
 /** A layer the camera of the application does not draw: Babylon.js gives cameras and meshes the 28 bits below it. */
@@ -126,7 +135,9 @@ async function main(): Promise<void> {
   scene.clearColor = new Color4(0.05, 0.06, 0.09, 1);
   new HemisphericLight("light", new Vector3(0.3, 1, -0.4), scene);
 
-  const camera = new ArcRotateCamera("camera", -Math.PI / 2 - 0.5, 1.2, 7, new Vector3(0, 1.45, 0), scene);
+  const target = new Vector3(0, 1.45, 0);
+  // With two eyes the scene is drawn twice, side by side, and the lens draws an image for each eye.
+  const camera = eyesApart === null ? new ArcRotateCamera("camera", -Math.PI / 2 - 0.5, 1.2, 7, target, scene) : new StereoscopicArcRotateCamera("camera", -Math.PI / 2 - 0.5, 1.2, 7, target, eyesApart, true, scene);
   camera.wheelPrecision = 60;
   camera.minZ = 0.05;
   camera.attachControl(canvas, true);
@@ -316,6 +327,9 @@ async function main(): Promise<void> {
     const { width, height } = display.resolution;
     status.textContent = `${engine.isWebGPU ? "WebGPU" : "WebGL"}, ${rightHanded ? "right" : "left"}-handed, ${engine.getFps().toFixed(0)} fps. One scene, ${scene.meshes.length} meshes, ${inside.length} of them on a hidden layer. Image of the lens: ${width} x ${height}.`;
   }, 500);
+
+  // With ?xr, the scene can be entered in a headset: its viewer then has two eyes.
+  await offerHeadset(scene, ground);
 
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());

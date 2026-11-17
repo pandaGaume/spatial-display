@@ -187,6 +187,7 @@ if (portal.neon) portal.neon.flow.amplitude = 0.4;   // waves of light along the
 - **Blending.** With a light or a glow, the screen of a portal is drawn with the blended meshes, after the glow, so the glow never covers the image. When opaque, it writes its depth first. A portal with neither is drawn as any surface.
 - **Windows.** Only a `RectSurfaceBuilder` takes `window`. `display.windowCamera` is the camera the library places; do not move it. The camera given to the display is not moved either: it lends its scene, its `maxZ` and its `layerMask`. The image always fills the opening, so `fit` is ignored. The light behind the opening is there when the portal glows, or when `window.glow` asks for it.
 - **Lenses.** `display.setLens({ scene })` makes the display draw what the camera of `scene` sees, with a copy of that camera, `display.lensCamera`; do not move it. A surface then shows the part of the image it covers on screen, whatever its shape: `fit` is ignored, the image takes the size of the canvas (`scale` in the lens changes that) and `display.resize()` does not hold. The mesh can be any that has texture coordinates, closed or open, built by Babylon.js or from the vertices of the application. Nothing is cut in front of a surface: choose what the image holds with `include` and with the layers of the camera given. A display is a screen, a window or a lens, one at a time. For a lens onto another scene, `display.setLens({ scene, root }, anchor)`; both scenes need the same handedness.
+- **Two eyes.** A window and a lens draw an image for each eye of a viewer who has two, the camera of a headset or a stereoscopic one: `display.texture` is the image of the left eye, `display.rightTexture` the one of the right eye, and a surface shows each eye its own. Nothing is asked of the application; it costs one more draw of the source scene. A screen keeps one image. A material of the application that samples `display.texture` itself shows the left image to both eyes.
 - **Large worlds.** A scene with a floating origin (`useLargeWorldRendering` on the engine, `useFloatingOrigin` on the scene) shows windows and lenses as any other: a lens reads its image with positions counted from the eye, as Babylon.js hands them to the shader of the surface. A material of the application that reads `display.imageTransform` itself must give it positions counted the same way.
 - **Layers.** `WINDOW_LAYER_MASK` (0x10000000) is taken: it holds the light a window sets behind its opening. Use another bit for layers of the application, above the 28 bits (0x0fffffff) Babylon.js gives cameras and meshes by default.
 - **Cost.** Each camera display is one more draw of its source scene. Lower it with `refresh: { hz: 10 }` or `"manual"` plus `display.invalidate()`, with a smaller `resolution`, and leave `pauseWhenHidden` on: a display stops drawing while none of its surfaces is on screen. The edges of a mesh are looked for once, and only for a portal that wears something.
@@ -206,6 +207,7 @@ Expect these objects in `scene.cameras`, `scene.meshes` and `scene.materials`; d
 | Camera `spatial-display.driver`, which draws nothing | of the camera | `drive: "display"` |
 | Camera `<display name>.window` | of the camera | window mode |
 | Camera `<display name>.lens` | of the camera | lens mode |
+| Render target `<display name>.right`, and camera `<display name>.window.right` or `<display name>.lens.right` | of the camera | window or lens mode, while the viewer has two eyes |
 | Mesh and material `<name>.worldGlow`, on `WINDOW_LAYER_MASK` | of the camera | window mode, with a glow |
 
 ### When something looks wrong
@@ -240,7 +242,7 @@ Do not promise these to a user, and do not look for them in the API:
 
 - Pointer input through a surface to the scene behind it.
 - A window on a surface that is not a flat rectangle.
-- A separate image for each eye in window mode and in lens mode. In a headset both eyes get the image drawn for the camera of the scene.
+- An image for each eye when a headset draws its two eyes in one pass (multiview): both eyes then read the image of the left one. With a camera for each eye, as Babylon.js draws them by default, each eye has its image.
 - A plane that cuts the image of a lens at its surface, as the opening of a window does.
 - A portal that shows in itself.
 - A glow drawn between the far wall and the near wall of a hollow surface that shows both its faces.
@@ -248,7 +250,7 @@ Do not promise these to a user, and do not look for them in the API:
 - A source scene that uses `scene.activeCameras` with `drive: "display"`.
 - Glow and highlight layers of the source scene in the image. The post-processes of the camera do show, with `postProcesses: true`.
 
-Nothing has been run in a headset.
+In a headset, the x-ray 360 example was looked at by eye, in the browser of a Meta Quest 3. Nothing was measured there.
 
 ## Part 2: working in this repository
 
@@ -259,14 +261,16 @@ npm install
 npm run build          # tsc -b, both packages
 npm run typecheck      # packages, tests and examples
 npm test               # Vitest
-npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh
-npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh
-npm run example:xray360 # http://localhost:5185, add ?polygon, ?sphere, ?webgpu, ?rh
+npm run example:portal # http://localhost:5183, add ?window, ?webgpu, ?rh, ?stereo, ?xr
+npm run example:xray   # http://localhost:5184, add ?webgpu, ?rh, ?xr
+npm run example:xray360 # http://localhost:5185, add ?polygon, ?sphere, ?webgpu, ?rh, ?stereo, ?xr
 npm run example:sphere # http://localhost:5186, add ?webgpu, ?rh
 npm run playground:bundle # examples/playground/out/spatial-display.js, the library for the Playground
 ```
 
 Run `npm run typecheck` and `npm test` before calling a change done.
+
+With `?xr` an example shows a button that enters its scene in a headset (`examples/xr.ts`). A headset asks for https: `npm run example:portal -- --mode headset` serves the example over https and to the whole network, with the certificate of `examples/.cert`, which is not tracked; `README.md` tells how to make it. The headset then opens `https://<address of the computer>:5183/?window&xr`.
 
 ### Layout
 
@@ -294,6 +298,7 @@ packages/babylon/src    the Babylon.js adapter
 packages/*/README.md    what npm shows for each package
 tests/core, tests/babylon
 examples/portal, examples/xray, examples/xray360, examples/sphere, examples/vite.base.ts
+examples/xr.ts          the button that enters an example in a headset, with ?xr
 examples/playground     xray.js, xray360.js: two examples as snippets of the Babylon.js Playground
                         bundle.mjs: builds the library on the BABYLON global; publish.mjs: saves a snippet
 scripts/bump.mjs        sets the next version of both packages, before a release
@@ -319,6 +324,7 @@ scripts/bump.mjs        sets the next version of both packages, before a release
 - Tests run on the null engine of Babylon.js: they check state, order and math, and draw nothing. A change to a shader, to blending or to draw order must also be looked at in an example, on WebGL and with `?webgpu`, and with `?rh`.
 - The glow of a portal is drawn before its screen because both have the very same bounding centre and the glow comes first in `scene.meshes`. A change to the bounds of either, or to the order they are made in, must keep both.
 - The glow of a curve is looked at from the side too: where a rim turns toward the eye its sides are seen end on, which is where a mitre goes wrong.
+- A change to how a window or a lens follows its viewer is looked at with `?stereo` too: the two halves of the screen are the two eyes, and what stands behind an opening must shift from one to the other.
 - When bounds of a mesh are rebuilt with `buildBoundingInfo`, pass the world matrix of the mesh. Without it the mesh is culled and sorted as if it stood at the origin.
 - The examples serve Babylon.js unbundled (`optimizeDeps.exclude`). Do not remove that.
 

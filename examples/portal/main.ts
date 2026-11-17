@@ -20,10 +20,16 @@
  * the eye of the viewer, as if the opening gave onto the world, and the glow
  * of its frame carries on behind the opening.
  *
- * URL: ?webgpu for the WebGPU engine, ?rh for right-handed scenes, ?window for the window mode.
+ * With ?stereo the viewer has two eyes, drawn side by side: a window then
+ * draws an image for each, and what stands behind the opening has depth.
+ * ?stereo=0.3 sets the distance between the eyes.
+ *
+ * URL: ?webgpu for the WebGPU engine, ?rh for right-handed scenes, ?window for the window mode, ?stereo for a
+ * viewer with two eyes, ?xr for a button that enters the room in a headset.
  */
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
+import { StereoscopicArcRotateCamera } from "@babylonjs/core/Cameras/Stereoscopic/stereoscopicArcRotateCamera.js";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight.js";
@@ -42,10 +48,13 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { CameraDisplay, CylinderSurfaceBuilder, PortalBuilder, RectSurfaceBuilder, TextureDisplay, attachDisplay, type ITextureDisplay } from "@spacexr/spatial-display-babylon";
 import type { DisplayFit, DisplayRefresh } from "@spacexr/spatial-display-core";
+import { offerHeadset } from "../xr.js";
 
 const params = new URLSearchParams(location.search);
 const rightHanded = params.has("rh");
 const windowMode = params.has("window");
+/** Distance between the two eyes of the viewer; null for a viewer with one eye. */
+const eyesApart = params.has("stereo") ? Number(params.get("stereo")) || 0.064 : null;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 
 async function createEngine(): Promise<AbstractEngine> {
@@ -136,7 +145,10 @@ async function main(): Promise<void> {
   const light = new HemisphericLight("light", new Vector3(0, 1, 0), room);
   light.intensity = 0.55;
 
-  const camera = new ArcRotateCamera("camera", rightHanded ? Math.PI / 2 - 0.5 : -Math.PI / 2 - 0.5, 1.35, 5.2, new Vector3(0.2, 1.15, 0), room);
+  const alpha = rightHanded ? Math.PI / 2 - 0.5 : -Math.PI / 2 - 0.5;
+  const target = new Vector3(0.2, 1.15, 0);
+  // With two eyes the room is drawn twice, side by side, and a window draws an image of the world for each eye.
+  const camera = eyesApart === null ? new ArcRotateCamera("camera", alpha, 1.35, 5.2, target, room) : new StereoscopicArcRotateCamera("camera", alpha, 1.35, 5.2, target, eyesApart, true, room);
   camera.wheelPrecision = 60;
   camera.minZ = 0.05;
   camera.attachControl(canvas, true);
@@ -274,6 +286,9 @@ async function main(): Promise<void> {
   setInterval(() => {
     status.textContent = `${engine.isWebGPU ? "WebGPU" : "WebGL"}, ${rightHanded ? "right" : "left"}-handed, ${windowMode ? "window" : "screen"}, ${engine.getFps().toFixed(0)} fps, world drawn ${draws} times`;
   }, 500);
+
+  // With ?xr, the room can be entered in a headset: its viewer then has two eyes.
+  await offerHeadset(room, floor);
 
   // Only the room is rendered here.
   engine.runRenderLoop(() => room.render());

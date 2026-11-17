@@ -54,7 +54,29 @@ npm run example:xray360
 npm run example:sphere
 ```
 
-The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185; add `?polygon` or `?sphere` to start with another surface than the ring. The sphere example opens on http://localhost:5186. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes.
+The portal example opens on http://localhost:5183; add `?window` for the window mode. The x-ray example opens on http://localhost:5184, the x-ray 360 example on http://localhost:5185; add `?polygon` or `?sphere` to start with another surface than the ring. The sphere example opens on http://localhost:5186. All take `?webgpu` for the WebGPU engine and `?rh` for right-handed scenes. The portal and x-ray 360 examples take `?stereo` for a viewer with two eyes, drawn side by side.
+
+### In a headset
+
+The portal, x-ray and x-ray 360 examples take `?xr`: the page then shows a button that enters the scene in a headset, where the browser has one on offer. The viewer walks by pointing at the floor.
+
+A headset lets a page in only if it can trust it: https, or localhost. With `--mode headset` an example is served over https, and to the whole network:
+
+```bash
+npm run example:portal -- --mode headset
+```
+
+The headset, on the same network, opens `https://<address of this computer>:5183/?window&xr`. Its browser warns about the certificate once: it is one the developer makes for themselves, in `examples/.cert`, which git does not track. With OpenSSL, as Git for Windows brings it, from the root of the repository:
+
+```bash
+mkdir -p examples/.cert
+```
+
+```bash
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout examples/.cert/key.pem -out examples/.cert/cert.pem -subj "/CN=spatial-display examples" -addext "subjectAltName=IP:192.168.1.20,DNS:localhost,IP:127.0.0.1"
+```
+
+Put the address of the computer on its network in place of `192.168.1.20`. `MSYS_NO_PATHCONV=1` keeps Git Bash from reading the subject as a path; another shell does not need it. The firewall of the computer must let Node.js be reached from the network.
 
 ## Use
 
@@ -242,6 +264,7 @@ const portal = new PortalBuilder("gate", scene)
 - The anchor is the frame of the opening in the world: x to the right and y upward when looking into the world, which lies toward +z in a left-handed scene and toward -z in a right-handed one. Its scale sizes the world against the opening. Without an anchor the opening stands at the origin of the world.
 - The image is drawn after Babylon.js has updated the camera of the viewer, in the same frame: it does not lag behind the viewer.
 - The image always fills the opening: `fit` does not apply.
+- A viewer who has two eyes gets an image for each: see [Two eyes](#two-eyes-stereo-and-headsets) below.
 
 The glow of the frame carries on behind the opening. Four walls of light run from the edges of the opening straight into the world, as the inside of a box, and fade with depth: `window.glow` sets their `depth`, `intensity`, `falloff` and `color`, and `portal.worldGlowDepth` and `portal.worldGlowIntensity` change them later; `glow: false` leaves them out. A portal with no glow has none behind it either, unless `window.glow` asks for them. Being in the world, they are drawn with it: the wall away from the viewer shows more than the one on their side, and what stands in front of a wall hides it. Only the camera of the window draws them (`WINDOW_LAYER_MASK`); the other cameras of the world do not see them.
 
@@ -327,6 +350,24 @@ attachDisplay(inside, display);
 
 A viewer who steps in is carried to the centre and sees the other world all around, as if they stood at the anchor, and looks about as they would there. They have not left the room: a key that moves takes them back out. The display is paused (`display.paused`) while the viewer is far from the sphere, so the other scene is rendered only when it can be seen.
 
+## Two eyes: stereo and headsets
+
+A screen shows one image, whoever looks at it. A window and a lens follow their viewer, and a viewer may have two eyes: the camera of a headset, or a stereoscopic camera of Babylon.js. Each eye then stands at its own place, and gets its own image:
+
+- The display draws the scene it shows twice, with a camera for each eye: a window looks through the opening from the place of each eye, a lens copies the camera of each eye. `display.texture` is the image of the left eye, `display.rightTexture` the one of the right eye.
+- A surface shows each eye its own image. Babylon.js draws the two eyes one after the other, with a camera for each: the material of the surface is given the image of the eye that is being drawn. What stands behind an opening so has depth, as the rest of the scene.
+- Nothing is asked of the application. The second image is made when a viewer with two eyes is first met, and let go of when the viewer has one eye again.
+- It costs one more draw of the scene the display shows. `refresh`, `pauseWhenHidden` and `paused` hold for both images.
+
+```ts
+// A viewer with two eyes, side by side on screen: the window draws the world for each.
+const camera = new StereoscopicArcRotateCamera("camera", alpha, beta, radius, target, 0.064, true, scene);
+```
+
+A material of the application that samples `display.texture` itself shows the image of the left eye to both.
+
+A headset is such a viewer: Babylon.js gives the camera of a WebXR session a camera for each eye, and draws them one after the other unless multiview is asked for. The examples enter one with `?xr`: see [In a headset](#in-a-headset).
+
 ## WebGL and WebGPU
 
 The two materials are written in GLSL and in WGSL, and pick their language from the engine: WebGPU does not have to translate GLSL. The two versions of each shader live side by side in `packages/babylon/src/materials/shaders.ts`.
@@ -362,6 +403,7 @@ The second command saves a new revision of the snippet `816LOC` and prints its a
 | `npm run example:xray` | the x-ray example: a window onto its own scene, a wall, a walker and its skeleton |
 | `npm run example:xray360` | the x-ray 360 example: a lens on a ring, on a polygon that is not flat, on a sphere |
 | `npm run example:sphere` | the sphere example: a lens onto another scene, all around a viewer who steps into a sphere |
+| `npm run example:portal -- --mode headset` | an example served over https and to the whole network, for a headset; so for the others |
 | `npm run playground:bundle` | the library as one module for the Babylon.js Playground, in `examples/playground/out` |
 | `npm run bump:patch`, `bump:minor`, `bump:major` | the next version of both packages, before a release |
 
@@ -392,14 +434,15 @@ Each package is published with its own `README.md` and a copy of the license; `n
 
 ## State and limits
 
-The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. The walker of the x-ray example and its skeleton were looked at on WebGL2 in a left-handed scene and on WebGPU in a right-handed one. So were the plain back of a surface, on the ring of the x-ray 360 example, and the sphere example, walked into and out of. The two snippets were run in the Playground itself, on WebGL2, with Babylon.js 9.37; the library built for the Playground was also run on WebGPU, in a page that loads Babylon.js as the Playground does. Nothing has run in a headset.
+The examples have been checked in a browser on WebGL2 and on WebGPU, in left- and right-handed scenes. On WebGL2, in both handednesses, the pixels of the canvas were compared with what the transparency rule above predicts, for a picture with alpha and for a camera display with a see-through background: they agree within 1/255 away from edges. In window mode, also on WebGL2 and in both handednesses, objects of the world were found on the canvas where their place behind the opening predicts, from three places of the viewer. On WebGPU the checks were by eye. The lens of the x-ray 360 example was checked by eye on WebGL2 and on WebGPU, in both handednesses; the tests compare the camera of a lens with the one of its viewer. The frame, the light and the glow of a portal were checked by eye on a flat rectangle, on a bent screen, on a ring and on a mesh of the application: each in left- and right-handed scenes, and all but the last on both WebGL2 and WebGPU. Putting them on and taking them off was checked on the flat one, on WebGL2. The walker of the x-ray example and its skeleton were looked at on WebGL2 in a left-handed scene and on WebGPU in a right-handed one. So were the plain back of a surface, on the ring of the x-ray 360 example, and the sphere example, walked into and out of. The two snippets were run in the Playground itself, on WebGL2, with Babylon.js 9.37; the library built for the Playground was also run on WebGPU, in a page that loads Babylon.js as the Playground does. The two images of a viewer who has two eyes were checked with a stereoscopic camera, its eyes side by side on screen: for a window on WebGL2 and on WebGPU, where what stands behind the opening shifts from one eye to the other as it should, and for a lens on WebGL2 and, in a right-handed scene, on WebGPU. In a headset, the x-ray 360 example was entered in a Meta Quest 3, through its browser, and looked at by eye; nothing was measured there.
 
 The examples serve Babylon.js unbundled (`optimizeDeps.exclude` in their Vite configuration). Bundled ahead by Vite 7, the shaders that Babylon.js materials import on demand came with a second copy of its shader store, and those materials failed to compile.
 
-- A window draws one image, for the camera of the scene its opening stands in. In a headset both eyes get that same image: the world behind the opening shifts as the head moves, but has no depth of its own. A portal seen through another display, or by a second camera, shows the image drawn for the first.
+- A window follows one viewer: the camera of the scene its opening stands in, with an image for each of its eyes. A portal seen through another display, or by a second camera, shows the image drawn for the first.
+- The eyes of a viewer are told apart by the camera Babylon.js draws each with. A headset that draws its two eyes in one pass (multiview) is not handled: both eyes then read the image of the left one.
 - A window keeps its last image when the viewer goes behind its opening.
 - Only a flat rectangle can be a window.
-- A lens draws one image too, for the camera of the scene it follows, with the same limits in a headset and for a second camera. It cuts nothing in front of its surfaces.
+- A lens follows one viewer too, the camera of the scene it is given, with the same limits for a second camera and for multiview. It cuts nothing in front of its surfaces.
 - A mesh needs texture coordinates to be a surface, even for a lens, which does not use them.
 - The glow of a portal is drawn before its whole surface. On a hollow surface that shows both its faces, as a ring, the far wall is therefore drawn over the glow of the near rim: seen from outside, the near rim keeps its line but shows no glow against the inside of the ring.
 - The frame of a portal on a mesh of the application is counted in the space of that mesh: a mesh that is scaled thickens its tube. The light and the glow keep their size.

@@ -109,6 +109,19 @@ interface ILensState {
   observer: Observer<Scene> | null;
 }
 
+/**
+ * What a window or a lens draws for the right eye of a viewer who has two, as
+ * in a headset: an image of its own, by a camera of its own. The left eye
+ * keeps the image and the camera of the display.
+ */
+interface IRightEye {
+  texture: RenderTargetTexture;
+  camera: TargetCamera;
+  projection: Matrix;
+  /** For a lens: from the world of the viewer to the screen of their right eye. */
+  transform: Matrix;
+}
+
 /** The near plane of a window is the plane of its opening, by a hair: what the camera draws starts on the opening. */
 const WINDOW_NEAR_RATIO = 0.999;
 /** Closer than this to the plane of the opening, the near plane stops following the eye. */
@@ -141,8 +154,7 @@ const DEFAULT_RESOLUTION: Readonly<ISize2> = { width: 1280, height: 720 };
  * opening sees through it, as if the opening gave onto the scene of the
  * display. The display then draws with a camera of its own, which follows the
  * eye of the viewer; the camera it was given only lends its scene, its far
- * plane and its layer mask. One image is drawn, for the camera of the scene
- * the opening stands in: in a headset both eyes get that same image.
+ * plane and its layer mask.
  *
  * `setLens` makes it the image of a lens: what the viewer sees, drawn as the
  * display draws it. The camera of the display copies the one of the viewer,
@@ -150,6 +162,11 @@ const DEFAULT_RESOLUTION: Readonly<ISize2> = { width: 1280, height: 720 };
  * shape. Nothing is cut in front of the surface, as the plane of a window
  * does: what the image shows is chosen by the layers of the camera given and
  * by `include`.
+ *
+ * A window and a lens follow a viewer. For one who has two eyes, the camera of
+ * a headset or a stereoscopic one, they draw two images, one for each eye, and
+ * a surface shows each eye its own: what stands behind the opening has depth.
+ * The second image is another draw of the scene the display shows.
  */
 export class CameraDisplay extends Display implements ITextureDisplay, ISourceHubClient {
   readonly onChangedObservable = new Observable<IDisplayChange>();
@@ -177,6 +194,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   private hub: SourceHub;
   private windowState: IWindowState | null = null;
   private lensState: ILensState | null = null;
+  /** There while a window or a lens follows a viewer who has two eyes. */
+  private rightEye: IRightEye | null = null;
   /** A window and a lens are drawn once the viewer is known for the frame: whether the image is due waits until then. */
   private windowDue = false;
   private sceneDisposeObserver: Observer<Scene> | null = null;
@@ -228,6 +247,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     this._clearColor = value ? { ...value } : null;
     const seeThrough = this._texture.hasAlpha;
     this.applyClearColor(this._texture);
+    if (this.rightEye) this.applyClearColor(this.rightEye.texture);
     this.clock.invalidate();
     if (this._texture.hasAlpha !== seeThrough) this.onChangedObservable.notifyObservers({ kind: "alpha" });
   }
@@ -312,6 +332,21 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     return this.lensState?.transform ?? null;
   }
 
+  /** See `ITextureDisplay.rightTexture`: there while a window or a lens follows a viewer who has two eyes. */
+  get rightTexture(): RenderTargetTexture | null {
+    return this.rightEye?.texture ?? null;
+  }
+
+  /** See `ITextureDisplay.rightImageTransform`: a matrix while a lens follows a viewer who has two eyes, else null. */
+  get rightImageTransform(): Matrix | null {
+    return this.lensState && this.rightEye ? this.rightEye.transform : null;
+  }
+
+  /** The camera that draws the image of the right eye of a viewer who has two; null otherwise. Do not move it. */
+  get rightEyeCamera(): Camera | null {
+    return this.rightEye?.camera ?? null;
+  }
+
   /** See `ITextureDisplay.setLens`. */
   setLens(lens: IDisplayLens | null, anchor: TransformNode | null = null): void {
     if (this.disposed) return;
@@ -378,6 +413,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   protected override onResized(): void {
     const { width, height } = this.resolution;
     this._texture.resize({ width, height });
+    this.rightEye?.texture.resize({ width, height });
     this.clock.invalidate();
     this.onChangedObservable.notifyObservers({ kind: "resolution" });
   }
@@ -420,7 +456,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
 
   /** Whether the image is to be drawn at this frame; sets the render target accordingly. */
   private decide(deltaSeconds: number, frameId: number): boolean {
-    const texture = this._texture;
+    // The two images of a viewer who has two eyes are drawn together, or not at all.
+    const textures = this.rightEye ? [this._texture, this.rightEye.texture] : [this._texture];
     const active = !this.paused && this.isWatched(frameId);
     if (active && !this.windowState && !this.lensState) {
       // Babylon.js updates the cameras it renders the scene with, and no other.
@@ -429,18 +466,20 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     }
     if (this.clock.refresh === "frame") {
       const rate = active ? RenderTargetTexture.REFRESHRATE_RENDER_ONEVERYFRAME : RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
-      if (texture.refreshRate !== rate) texture.refreshRate = rate;
+      for (const texture of textures) if (texture.refreshRate !== rate) texture.refreshRate = rate;
       return active;
     }
-    // The texture is drawn once each time its counter is reset.
-    if (texture.refreshRate !== RenderTargetTexture.REFRESHRATE_RENDER_ONCE) texture.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+    // A texture is drawn once each time its counter is reset.
+    for (const texture of textures) {
+      if (texture.refreshRate !== RenderTargetTexture.REFRESHRATE_RENDER_ONCE) texture.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+    }
     if (!active) {
       // Due as soon as a surface shows again.
       this.clock.invalidate();
       return false;
     }
     if (!this.clock.tick(deltaSeconds)) return false;
-    texture.resetRefreshCounter();
+    for (const texture of textures) texture.resetRefreshCounter();
     return true;
   }
 
@@ -465,6 +504,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     if (state.observer) state.host.onBeforeRenderObservable.remove(state.observer);
     this._texture.activeCamera = this._camera;
     state.camera.dispose();
+    this.dropRightEye();
   }
 
   /** No longer a lens: the display draws with the camera it was given. */
@@ -476,6 +516,38 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     if (state.observer) state.lens.scene.onBeforeRenderObservable.remove(state.observer);
     this._texture.activeCamera = this._camera;
     state.camera.dispose();
+    this.dropRightEye();
+  }
+
+  /**
+   * The image and the camera of the right eye, made when a viewer who has two
+   * eyes is first met. The surfaces are told: they read another image there.
+   */
+  private ensureRightEye(kind: "window" | "lens"): IRightEye {
+    if (this.rightEye) return this.rightEye;
+    const scene = this._camera.getScene();
+    const camera = new TargetCamera(`${this.name}.${kind}.right`, Vector3.Zero(), scene, false);
+    camera.rotationQuaternion = new Quaternion();
+    camera.doNotSerialize = true;
+    // The same matrix is rewritten at every frame.
+    const projection = new Matrix();
+    camera.freezeProjectionMatrix(projection);
+    const texture = this.createTexture(camera, `${this.name}.right`);
+    this.rightEye = { texture, camera, projection, transform: Matrix.Identity() };
+    this.onChangedObservable.notifyObservers({ kind: "mapping" });
+    return this.rightEye;
+  }
+
+  /** One image is enough again: the viewer has one eye, or the display is a screen. Returns null. */
+  private dropRightEye(): null {
+    const eye = this.rightEye;
+    if (!eye) return null;
+    this.rightEye = null;
+    // Removes the texture from the custom render targets of its scene too.
+    eye.texture.dispose();
+    eye.camera.dispose();
+    if (!this.disposed) this.onChangedObservable.notifyObservers({ kind: "mapping" });
+    return null;
   }
 
   /**
@@ -486,19 +558,36 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
   private updateLens(): void {
     const state = this.lensState;
     if (!state || this.disposed) return;
-    const { lens, anchor, camera } = state;
+    const { lens } = state;
     const viewer = lens.scene.activeCamera;
     if (!viewer) return;
+    // A viewer who has two eyes gets an image for each: the display copies the camera of each eye.
+    const eyes = eyesOf(viewer);
+    const right = eyes ? this.ensureRightEye("lens") : this.dropRightEye();
+    const sight = eyes ? eyes[0] : viewer;
 
-    // The image is the screen of the viewer: it has its proportions, which the projection copied below needs.
+    // The image is the screen of the viewer, or the share of it one eye is given: it has its proportions, which the
+    // projection copied below needs.
     const engine = lens.scene.getEngine();
     const scale = Math.min(2, Math.max(0.1, lens.scale ?? 1));
-    const width = engine.getRenderWidth() * viewer.viewport.width * scale;
-    const height = engine.getRenderHeight() * viewer.viewport.height * scale;
+    const width = engine.getRenderWidth() * sight.viewport.width * scale;
+    const height = engine.getRenderHeight() * sight.viewport.height * scale;
     // Never above what the engine can allocate.
     const fit = Math.min(1, engine.getCaps().maxTextureSize / Math.max(width, height, 1));
     this.resize(width * fit, height * fit);
 
+    this.copyEye(state, sight, state.camera, state.projection, state.transform);
+    if (eyes && right) this.copyEye(state, eyes[1], right.camera, right.projection, right.transform);
+
+    if (this.windowDue && this.driven) {
+      this.windowDue = false;
+      this.hub.render();
+    }
+  }
+
+  /** Makes `camera` a copy of `viewer`, an eye of the viewer of a lens, and writes how a surface reads its image. */
+  private copyEye(state: ILensState, viewer: Camera, camera: TargetCamera, projection: Matrix, transform: Matrix): void {
+    const { lens, anchor } = state;
     // Where the viewer stands, brought from the frame of `lens.root` to the frame of the anchor when they are given.
     let world = viewer.getWorldMatrix();
     if (lens.root) {
@@ -512,7 +601,7 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     // Babylon.js works out the up of a camera from its rotation only now and then: given here, a viewer who rolls is followed.
     UP.rotateByQuaternionToRef(rotation, camera.upVector);
 
-    state.projection.copyFrom(viewer.getProjectionMatrix());
+    projection.copyFrom(viewer.getProjectionMatrix());
     camera.minZ = viewer.minZ;
     camera.maxZ = viewer.maxZ;
     camera.layerMask = this._camera.layerMask;
@@ -522,13 +611,8 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
       // of a surface a world matrix counted from there. The transform reads the points of the surface the same way:
       // it turns as the viewer does, and no longer moves them.
       TMP_VIEW.copyFrom(viewer.getViewMatrix()).setTranslationFromFloats(0, 0, 0);
-      TMP_VIEW.multiplyToRef(viewer.getProjectionMatrix(), state.transform);
-    } else viewer.getViewMatrix().multiplyToRef(viewer.getProjectionMatrix(), state.transform);
-
-    if (this.windowDue && this.driven) {
-      this.windowDue = false;
-      this.hub.render();
-    }
+      TMP_VIEW.multiplyToRef(viewer.getProjectionMatrix(), transform);
+    } else viewer.getViewMatrix().multiplyToRef(viewer.getProjectionMatrix(), transform);
   }
 
   /**
@@ -540,16 +624,37 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     const state = this.windowState;
     if (!state || this.disposed) return;
     const viewer = state.host.activeCamera;
-    const { window, anchor, camera } = state;
-    const { width, height } = window;
+    const { width, height } = state.window;
     if (!viewer || !(width > 0) || !(height > 0)) return;
+    // A viewer who has two eyes gets an image for each: each eye looks through the opening from its own place.
+    const eyes = eyesOf(viewer);
+    // From behind there is nothing to look through: the last image stays.
+    if (!this.placeEye(state, eyes ? eyes[0] : viewer, state.camera, state.projection)) return;
+    const right = eyes ? this.ensureRightEye("window") : this.dropRightEye();
+    if (eyes && right) this.placeEye(state, eyes[1], right.camera, right.projection);
+
+    if (this.windowDue && this.driven) {
+      this.windowDue = false;
+      this.hub.render();
+    }
+  }
+
+  /**
+   * Places `camera` where `viewer`, an eye of the viewer of a window, stands as
+   * seen from the opening, and skews its frustum through the edges of the
+   * opening. False for an eye that stands behind the opening: nothing is changed.
+   */
+  private placeEye(state: IWindowState, viewer: Camera, camera: TargetCamera, projection: Matrix): boolean {
+    const { window, anchor } = state;
+    const { width, height } = window;
 
     // The eye in the frame of the opening. Its front is toward -z in a left-handed scene, toward +z in a right-handed one.
     window.root.computeWorldMatrix(true).invertToRef(TMP_MATRIX);
+    // Babylon.js works out the place of a camera with its view: asked for here, the place is the one of this frame.
+    viewer.getViewMatrix();
     const eye = Vector3.TransformCoordinatesToRef(viewer.globalPosition, TMP_MATRIX, TMP_EYE);
     const front = state.host.useRightHandedSystem ? eye.z : -eye.z;
-    // From behind there is nothing to look through: the last image stays.
-    if (!(front > 1e-6)) return;
+    if (!(front > 1e-6)) return false;
 
     // The same place in the scene the display shows, which lies behind the opening: toward +z when left-handed, -z when right-handed.
     const scene = this._camera.getScene();
@@ -571,15 +676,11 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     const far = Math.max(this._camera.maxZ > 0 ? this._camera.maxZ : WINDOW_DEFAULT_FAR, near * 2);
     const frustum = windowFrustum({ x: eye.x * scale, y: eye.y * scale, distance }, width * scale, height * scale, near);
     windowProjection(frustum, { near, far, rightHanded, halfZRange: scene.getEngine().isNDCHalfZRange }, TMP_PROJECTION);
-    Matrix.FromArrayToRef(TMP_PROJECTION, 0, state.projection);
+    Matrix.FromArrayToRef(TMP_PROJECTION, 0, projection);
     camera.minZ = near;
     camera.maxZ = far;
     camera.layerMask = this._camera.layerMask | WINDOW_LAYER_MASK;
-
-    if (this.windowDue && this.driven) {
-      this.windowDue = false;
-      this.hub.render();
-    }
+    return true;
   }
 
   private isWatched(frameId: number): boolean {
@@ -591,12 +692,12 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     return false;
   }
 
-  private createTexture(camera: Camera): RenderTargetTexture {
+  private createTexture(camera: Camera, name = this.name): RenderTargetTexture {
     const scene = camera.getScene();
     const options = this.options;
     const mipmaps = options.mipmaps ?? false;
     const { width, height } = this.resolution;
-    const texture = new RenderTargetTexture(this.name, { width, height }, scene, {
+    const texture = new RenderTargetTexture(name, { width, height }, scene, {
       generateMipMaps: mipmaps,
       samplingMode: mipmaps ? Texture.TRILINEAR_SAMPLINGMODE : Texture.BILINEAR_SAMPLINGMODE,
       samples: options.samples ?? 1,
@@ -652,7 +753,20 @@ export class CameraDisplay extends Display implements ITextureDisplay, ISourceHu
     this.hub.remove(this);
     // Removes the texture from the custom render targets of its scene too.
     this._texture.dispose();
+    this.dropRightEye();
   }
+}
+
+/**
+ * The cameras of the two eyes of a viewer who has two, the left one first:
+ * the camera of a headset, or a stereoscopic one. null for a viewer with one eye.
+ */
+function eyesOf(viewer: Camera): [Camera, Camera] | null {
+  const rig = viewer.rigCameras;
+  if (rig.length < 2) return null;
+  const left = rig.find((camera) => camera.isLeftCamera) ?? rig[0];
+  const right = rig.find((camera) => camera.isRightCamera) ?? rig[1];
+  return left && right && left !== right ? [left, right] : null;
 }
 
 /** A render target cannot have an empty side. */

@@ -65,6 +65,9 @@ export class DisplayMaterial extends ShaderMaterial {
   private readonly keyMask = new Vector4(0, 0, 0, 0);
   private _opacity = 1;
   private _projector: Matrix | null = null;
+  private _image: BaseTexture | null = null;
+  private _rightImage: BaseTexture | null = null;
+  private _rightProjector: Matrix | null = null;
   private _chromaKey: Readonly<IChromaKey> | null = null;
   private _alwaysBlended = false;
 
@@ -95,6 +98,18 @@ export class DisplayMaterial extends ShaderMaterial {
     this.setVector4("keyMask", this.keyMask);
     this.setMatrix("projector", NO_PROJECTOR);
     this.setFloat("projected", 0);
+    // Babylon.js draws a viewer who has two eyes with a camera for each, one after the other. The surface is
+    // bound before each draw: the eye that is being drawn is known then, and is given its own image.
+    this.onBindObservable.add(() => {
+      const right = this._rightImage;
+      const left = this._image;
+      const effect = this.getEffect();
+      if (!right || !left || !effect) return;
+      const forRightEye = scene.activeCamera?.isRightCamera === true;
+      effect.setTexture("displayTexture", forRightEye ? right : left);
+      const projector = forRightEye ? (this._rightProjector ?? this._projector) : this._projector;
+      if (projector) effect.setMatrix("projector", projector);
+    });
   }
 
   /**
@@ -116,7 +131,30 @@ export class DisplayMaterial extends ShaderMaterial {
 
   /** The texture of the display. */
   set image(texture: BaseTexture) {
+    this._image = texture;
     this.setTexture("displayTexture", texture);
+  }
+
+  /**
+   * The image of the right eye of a viewer who has two, as in a headset: the
+   * texture of the display is then the one of their left eye. null (default)
+   * when one image serves both eyes.
+   */
+  get rightImage(): BaseTexture | null {
+    return this._rightImage;
+  }
+
+  set rightImage(texture: BaseTexture | null) {
+    this._rightImage = texture;
+  }
+
+  /** How the image of the right eye is read, as `projector` tells for the other; null to read it as the other. */
+  get rightProjector(): Matrix | null {
+    return this._rightProjector;
+  }
+
+  set rightProjector(value: Matrix | null) {
+    this._rightProjector = value;
   }
 
   /** 1 shows the image opaque, 0 hides it. */

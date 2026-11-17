@@ -16,7 +16,8 @@
  * No mesh is copied: a mesh is drawn solid by the camera of the application
  * and as a wireframe by the screen, from the same vertices.
  *
- * URL: ?webgpu for the WebGPU engine, ?rh for a right-handed scene.
+ * URL: ?webgpu for the WebGPU engine, ?rh for a right-handed scene, ?xr for a
+ * button that enters the scene in a headset.
  */
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera.js";
@@ -38,6 +39,7 @@ import { CreateTorusKnot } from "@babylonjs/core/Meshes/Builders/torusKnotBuilde
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { CameraDisplay, PortalBuilder, RectSurfaceBuilder } from "@spacexr/spatial-display-babylon";
+import { offerHeadset } from "../xr.js";
 
 const params = new URLSearchParams(location.search);
 const rightHanded = params.has("rh");
@@ -381,6 +383,9 @@ async function main(): Promise<void> {
   setInterval(() => {
     status.textContent = `${engine.isWebGPU ? "WebGPU" : "WebGL"}, ${rightHanded ? "right" : "left"}-handed, ${engine.getFps().toFixed(0)} fps. One scene, ${scene.meshes.length} meshes, ${hidden.length + bones.size} of them on a hidden layer: pipes, a machine, and the ${bones.size} bones of the walker. The knot has ${triangles} triangles and is in the scene once.`;
   }, 500);
+
+  // With ?xr, the scene can be entered in a headset: its viewer then has two eyes.
+  await offerHeadset(scene, ground);
 
   engine.runRenderLoop(() => scene.render());
   window.addEventListener("resize", () => engine.resize());
