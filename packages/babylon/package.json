@@ -1,6 +1,6 @@
 {
   "name": "@spacexr/spatial-display-babylon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Babylon.js displays: the view of any camera of any scene as a texture, on any mesh surface, and a portal on a rectangle, a cylinder or a mesh, with a frame, a light and a glow.",
   "license": "Apache-2.0",
   "author": "Guillaume Pelletier (SpaceXR)",
@@ -32,7 +32,7 @@
   "sideEffects": false,
   "peerDependencies": {
     "@babylonjs/core": "^9.0.0",
-    "@spacexr/spatial-display-core": "^0.1.0"
+    "@spacexr/spatial-display-core": "^0.1.1"
   },
   "devDependencies": {
     "@babylonjs/core": "9.33.1"

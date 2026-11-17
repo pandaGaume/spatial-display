@@ -13,7 +13,7 @@ Guidance for coding agents. Part 1 is for an agent that integrates a portal, or 
 | `@spacexr/spatial-display-babylon` | Everything an application needs: `CameraDisplay`, `TextureDisplay`, `PortalBuilder`, `Portal`, the surface builders, `attachDisplay`. Peer dependency on `@babylonjs/core` 9. |
 | `@spacexr/spatial-display-core` | Types and math with no rendering library. An application imports from it only for types (`DisplayFit`, `DisplayRefresh`, `ISize2`, `IOutline`) or to build its own adapter. |
 
-Both are at version 0.1.0. Check that they are on npm before adding them to a manifest; if they are not, build this repository (`npm run build`) and link its two packages.
+Both are at version 0.1.1. Check that they are on npm before adding them to a manifest; if they are not, build this repository (`npm run build`) and link its two packages.
 
 There is nothing to call in the render loop. A display hooks itself to the engine and to the scenes it needs.
 
